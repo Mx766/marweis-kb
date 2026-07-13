@@ -9,6 +9,7 @@ PROJECT_DIR="/home/mx766/marweis-kb"
 SERVICE_NAME="marweis-kb"
 
 echo "=== 推送代码 ==="
+git push origin master
 git push server master
 
 echo ""
