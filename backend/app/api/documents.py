@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+import httpx
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user, get_current_user_optional, require_role
+from app.config import settings
 from app.models.user import User
 from app.models.document import Document
 from app.models.category import Category
@@ -239,6 +241,73 @@ async def delete_document(
     await db.flush()
     await db.commit()
     return {"message": "文档已删除"}
+
+
+@router.get("/{document_id}/preview")
+async def preview_document(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+):
+    """Return a presigned URL for inline preview (PDF in browser, not download)."""
+    from fastapi.responses import RedirectResponse
+
+    doc: Document | None = await db.get(Document, _uuid.UUID(document_id))
+    if not doc or doc.is_deleted:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    perm = PermissionService(db, current_user)
+    if not await perm.can_view_document(doc):
+        raise HTTPException(status_code=403, detail="无权查看该文档")
+
+    if doc.file_type == "link":
+        # For link-type docs, redirect to the source URL
+        return RedirectResponse(url=doc.source_url or doc.original_path)
+
+    # If preview exists, use it; otherwise convert on-demand
+    if doc.preview_path:
+        preview_url = FileService.get_download_url(doc.preview_path, doc.original_filename)
+        # For preview, don't force download — let browser display inline
+        return RedirectResponse(url=preview_url)
+
+    # On-demand conversion via Gotenberg
+    try:
+        import boto3
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=f"{'https' if settings.MINIO_SECURE else 'http'}://{settings.MINIO_ENDPOINT}",
+            aws_access_key_id=settings.MINIO_ACCESS_KEY,
+            aws_secret_access_key=settings.MINIO_SECRET_KEY,
+        )
+        bucket_key = doc.original_path[5:]
+        bucket, key = bucket_key.split("/", 1)
+        resp = s3.get_object(Bucket=bucket, Key=key)
+        file_content = resp["Body"].read()
+
+        # Convert
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            files = {"files": (doc.original_filename, file_content)}
+            convert_resp = await client.post(
+                f"{settings.GOTENBERG_URL}/forms/libreoffice/convert",
+                files=files,
+            )
+            if convert_resp.status_code == 200:
+                import uuid as _uuid_module
+                preview_key = f"previews/{_uuid_module.uuid4()}/{doc.original_filename.rsplit('.', 1)[0]}.pdf"
+                from io import BytesIO
+                s3.upload_fileobj(BytesIO(convert_resp.content), bucket, preview_key)
+                doc.preview_path = f"s3://{bucket}/{preview_key}"
+                await db.flush()
+                await db.commit()
+
+                preview_url = FileService.get_download_url(doc.preview_path, doc.original_filename)
+                return RedirectResponse(url=preview_url)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Preview conversion failed for doc {document_id}: {e}")
+
+    # Fallback: redirect to download
+    return RedirectResponse(url=f"/api/documents/{document_id}/download")
 
 
 @router.get("/{document_id}/download")
