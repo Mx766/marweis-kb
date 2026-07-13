@@ -131,6 +131,7 @@ class DocumentDetail(DocumentItem):
     original_path: str | None = None
     download_count: int = 0
     is_favorited: bool = False
+    preview_url: str | None = None  # Presigned URL for inline browser preview
 
 
 class DocumentListResponse(BaseModel):

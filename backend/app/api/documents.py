@@ -160,6 +160,11 @@ async def get_document(
     await db.commit()
     await db.refresh(doc)
 
+    # Generate preview URL inline so frontend can use it directly (avoids iframe auth issues)
+    preview_url: str | None = None
+    if doc.file_type != "link" and doc.preview_path:
+        preview_url = await FileService.get_preview_url(doc.preview_path, doc.original_filename)
+
     # Load uploader name
     uploader = await db.get(User, doc.uploader_id)
     item = _doc_to_item(doc, uploader)
@@ -168,6 +173,7 @@ async def get_document(
         preview_path=doc.preview_path,
         original_path=doc.original_path,
         download_count=doc.download_count,
+        preview_url=preview_url,
     )
 
 

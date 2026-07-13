@@ -178,25 +178,8 @@ const AUD_EXTS = ['mp3','wav','wma','flac','ogg']
 const isImage = computed(() => IMG_EXTS.includes(doc.value?.file_ext?.toLowerCase() || ''))
 const isVideo = computed(() => VID_EXTS.includes(doc.value?.file_ext?.toLowerCase() || ''))
 const isAudio = computed(() => AUD_EXTS.includes(doc.value?.file_ext?.toLowerCase() || ''))
-// previewUrl is fetched via JS to include the JWT token (iframe native requests don't carry it)
+// Preview URL is provided by the backend in get_document response (avoids cross-origin redirect issues)
 const previewUrl = ref('')
-
-async function fetchPreviewUrl(docId: string) {
-  const token = localStorage.getItem('token')
-  try {
-    const resp = await fetch(`/api/documents/${docId}/preview`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      redirect: 'manual',  // Don't follow — capture the presigned URL
-    })
-    if (resp.status >= 300 && resp.status < 400) {
-      previewUrl.value = resp.headers.get('Location') || ''
-    } else {
-      previewUrl.value = ''  // Non-redirect means no preview available
-    }
-  } catch {
-    previewUrl.value = ''
-  }
-}
 
 const fileColors: Record<string,string> = {
   pdf:'#e74c3c',doc:'#2980b9',docx:'#2980b9',xls:'#27ae60',xlsx:'#27ae60',ppt:'#e67e22',pptx:'#e67e22',
@@ -251,10 +234,8 @@ async function loadDoc() {
     const data: any = await get(`/api/documents/${route.params.id}`)
     doc.value = data
     isFavorited.value = data.is_favorited || false
-    // Fetch the preview URL via JS so the JWT token is included
-    if (data.file_type !== 'link') {
-      await fetchPreviewUrl(data.id)
-    }
+    // Use the presigned preview URL from the backend (avoids cross-origin iframe auth issues)
+    previewUrl.value = data.preview_url || ''
     // Load related docs from same category
     if (data.category_id) {
       const resp: any = await get('/api/documents', {
