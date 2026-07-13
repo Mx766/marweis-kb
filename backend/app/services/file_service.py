@@ -111,6 +111,8 @@ class FileService:
                 Params={"Bucket": bucket, "Key": key, "ResponseContentDisposition": f'attachment; filename="{filename}"'},
                 ExpiresIn=3600,
             )
+            # Replace localhost with the actual server host so external clients can download
+            url = url.replace("localhost", "192.168.60.175")
             return url
         except Exception:
             logger.warning("Failed to generate presigned URL for %s", object_path, exc_info=True)
