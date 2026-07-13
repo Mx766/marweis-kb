@@ -1,9 +1,8 @@
-import logging
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 from app.config import settings
 from app.api import auth, categories, documents, search, personal, admin
 from app.middleware.error_handler import global_exception_handler
@@ -46,4 +45,12 @@ async def health():
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
-    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """SPA fallback: serve index.html for any non-API path.
+        Vue Router handles client-side routing after index.html loads."""
+        index_file = FRONTEND_DIST / "index.html"
+        if index_file.is_file():
+            return FileResponse(index_file)
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
