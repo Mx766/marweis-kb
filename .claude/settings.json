@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(curl -s http://192.168.60.175/api/search?q=%E5%8C%BB%E7%96%97)",
+      "Read(//tmp/**)",
+      "Bash(curl -s \"http://192.168.60.175/api/search?q=\")",
+      "Bash(ssh -o StrictHostKeyChecking=no mx766@192.168.60.175 \"ls -la ~/marweis-kb/\")",
+      "Bash(ssh mx766@192.168.60.175 \"find ~/marweis-kb/ -type f -not -path '*/__pycache__/*' -not -path '*node_modules*' -not -path '*/dist/*' -not -path '*/.hermes/*' | sort\")",
+      "Read(//home/mx766/marweis-kb/**)",
+      "Read(//home/mx766/marweis-kb/backend/app/**)",
+      "Bash(ssh mx766@192.168.60.175 \"cat ~/marweis-kb/backend/app/config.py\")",
+      "Bash(ssh mx766@192.168.60.175 \"cat ~/marweis-kb/backend/app/auth.py\")",
+      "Bash(ssh mx766@192.168.60.175 \"cat ~/marweis-kb/backend/app/database.py\")"
+    ]
+  }
+}

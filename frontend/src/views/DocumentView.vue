@@ -182,7 +182,11 @@ function formatSize(bytes: number) { return bytes > 1048576 ? `${(bytes/1048576)
 
 function isEmbeddable(url: string) {
   if (!url) return false
-  return url.includes('nmpa.gov.cn') || url.includes('samr.gov.cn')
+  try {
+    const parsed = new URL(url)
+    return ['https:', 'http:'].includes(parsed.protocol) &&
+      (url.includes('nmpa.gov.cn') || url.includes('samr.gov.cn'))
+  } catch { return false }
 }
 
 function copyLink() {

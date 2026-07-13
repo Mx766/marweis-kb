@@ -18,8 +18,7 @@
         </el-button>
       </el-form>
       <div class="login-hint">
-        <p>演示账号：admin / marweis2026</p>
-        <p>或使用部门账号：zhangsan / 123456</p>
+        <p>如需账号请联系系统管理员</p>
       </div>
     </div>
   </div>

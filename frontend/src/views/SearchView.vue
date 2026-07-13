@@ -68,8 +68,10 @@ function formatDate(d: string) { return dayjs(d).format('YYYY-MM-DD') }
 
 function highlight(text: string) {
   if (!query.value || !text) return text
+  // Escape HTML before inserting search highlight markers
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   const re = new RegExp(`(${query.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
-  return text.replace(re, '<em style="background:#fff3cd;font-style:normal">$1</em>')
+  return escaped.replace(re, '<em style="background:#fff3cd;font-style:normal">$1</em>')
 }
 
 async function doSearch() {
