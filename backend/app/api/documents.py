@@ -268,7 +268,7 @@ async def preview_document(
         if parsed.scheme and parsed.scheme not in ("http", "https"):
             raise HTTPException(status_code=400, detail="不支持的重定向协议")
         if parsed.netloc and not any(
-            parsed.netloc.endswith(d) for d in (
+            parsed.netloc == d or parsed.netloc.endswith("." + d) for d in (
                 "nmpa.gov.cn", "cmde.org.cn", "samr.gov.cn",
                 "fda.gov", "ecfr.gov", "eur-lex.europa.eu",
                 "iso.org", "maris-reg.com",
