@@ -10,14 +10,27 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def get_minio_client():
-    """Return a boto3 S3 client configured for MinIO. Public so preview endpoint can reuse it."""
+def _build_minio_client(endpoint: str) -> object:
+    """Create a boto3 S3 client for the given MinIO endpoint."""
     return boto3.client(
         "s3",
-        endpoint_url=f"{'https' if settings.MINIO_SECURE else 'http'}://{settings.MINIO_ENDPOINT}",
+        endpoint_url=f"{'https' if settings.MINIO_SECURE else 'http'}://{endpoint}",
         aws_access_key_id=settings.MINIO_ACCESS_KEY,
         aws_secret_access_key=settings.MINIO_SECRET_KEY,
     )
+
+
+def get_minio_client():
+    """Return a boto3 S3 client for internal MinIO operations."""
+    return _build_minio_client(settings.MINIO_ENDPOINT)
+
+
+def _get_presigned_client():
+    """Return a boto3 S3 client configured with the PUBLIC endpoint.
+    Presigned URLs must be signed with the endpoint that external clients use.
+    """
+    endpoint = settings.MINIO_PUBLIC_ENDPOINT or settings.MINIO_ENDPOINT
+    return _build_minio_client(endpoint)
 
 
 def _ensure_bucket_exists(s3):
@@ -119,7 +132,8 @@ class FileService:
         bucket_key = object_path[5:]  # strip "s3://"
         bucket, key = bucket_key.split("/", 1)
 
-        s3 = get_minio_client()
+        # Use the PUBLIC endpoint client so the signature matches the URL clients see
+        s3 = _get_presigned_client()
 
         try:
             params: dict = {"Bucket": bucket, "Key": key}
@@ -134,11 +148,6 @@ class FileService:
                 Params=params,
                 ExpiresIn=settings.MINIO_PRESIGNED_EXPIRES,
             )
-            # Rewrite internal endpoint to public endpoint for external clients
-            public_endpoint = settings.MINIO_PUBLIC_ENDPOINT
-            if public_endpoint:
-                internal_endpoint = settings.MINIO_ENDPOINT
-                url = url.replace(internal_endpoint, public_endpoint)
             return url
         except Exception:
             logger.warning("Failed to generate presigned URL for %s", object_path, exc_info=True)
