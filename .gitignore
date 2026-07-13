@@ -32,5 +32,8 @@ pg_data/
 meili_data/
 minio_data/
 
+# Seed documents (large files, not pushed to GitHub)
+seed_docs/
+
 # Alembic
 backend/alembic/versions/*.pyc

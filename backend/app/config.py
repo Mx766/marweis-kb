@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = str(ENV_FILE)
         env_file_encoding = "utf-8"
+        extra = "ignore"  # Ignore old-style keys like DATABASE_URL in .env
 
 
 settings = Settings()
