@@ -261,8 +261,21 @@ async def preview_document(
         raise HTTPException(status_code=403, detail="无权查看该文档")
 
     if doc.file_type == "link":
-        # For link-type docs, redirect to the source URL
-        return RedirectResponse(url=doc.source_url or doc.original_path)
+        # Validate URL before redirect to prevent open redirect attacks
+        target_url = doc.source_url or doc.original_path
+        from urllib.parse import urlparse
+        parsed = urlparse(target_url)
+        if parsed.scheme and parsed.scheme not in ("http", "https"):
+            raise HTTPException(status_code=400, detail="不支持的重定向协议")
+        if parsed.netloc and not any(
+            parsed.netloc.endswith(d) for d in (
+                "nmpa.gov.cn", "cmde.org.cn", "samr.gov.cn",
+                "fda.gov", "ecfr.gov", "eur-lex.europa.eu",
+                "iso.org", "maris-reg.com",
+            )
+        ):
+            raise HTTPException(status_code=400, detail="不支持的外部链接")
+        return RedirectResponse(url=target_url)
 
     # If preview exists, use it; otherwise convert on-demand
     if doc.preview_path:

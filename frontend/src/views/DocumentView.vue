@@ -61,10 +61,20 @@
             </div>
           </template>
 
-          <!-- Document placeholder with rich info -->
+          <!-- Document placeholder with rich info — now with inline preview -->
           <template v-else>
             <div class="preview-placeholder">
-              <div class="preview-page">
+              <!-- PDF Preview iframe -->
+              <div v-if="previewUrl" class="inline-preview">
+                <iframe
+                  :src="previewUrl"
+                  width="100%"
+                  height="700px"
+                  style="border:none;border-radius:8px"
+                  title="文档预览"
+                ></iframe>
+              </div>
+              <div class="preview-page" :class="{ 'has-preview': previewUrl }">
                 <div class="file-type-badge">
                   <el-tag :color="fileIconColor(doc.file_ext)" effect="dark" size="large">
                     {{ doc.file_ext?.toUpperCase() }}
