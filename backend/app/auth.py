@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 
-from passlib.context import CryptContext
+import bcrypt
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -12,22 +12,17 @@ from app.database import get_db
 from app.models.user import User
 
 security = HTTPBearer()
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # ── Password strength ──────────────────────────────────────
 _MIN_PASSWORD_LENGTH = 8
 
 
 def hash_password(password: str) -> str:
-    return _pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    try:
-        return _pwd_context.verify(plain, hashed)
-    except ValueError:
-        # bcrypt may reject malformed or over-length hashes from older versions
-        return False
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
 def validate_password_strength(password: str) -> str | None:
