@@ -178,8 +178,13 @@ const AUD_EXTS = ['mp3','wav','wma','flac','ogg']
 const isImage = computed(() => IMG_EXTS.includes(doc.value?.file_ext?.toLowerCase() || ''))
 const isVideo = computed(() => VID_EXTS.includes(doc.value?.file_ext?.toLowerCase() || ''))
 const isAudio = computed(() => AUD_EXTS.includes(doc.value?.file_ext?.toLowerCase() || ''))
-// Preview URL is provided by the backend in get_document response (avoids cross-origin redirect issues)
-const previewUrl = ref('')
+// Preview URL with token query param for iframe auth
+const previewUrl = computed(() => {
+  if (!doc.value) return ''
+  const token = auth.token
+  const qs = token ? `?token=${encodeURIComponent(token)}` : ''
+  return `/api/documents/${doc.value.id}/preview${qs}`
+})
 
 const fileColors: Record<string,string> = {
   pdf:'#e74c3c',doc:'#2980b9',docx:'#2980b9',xls:'#27ae60',xlsx:'#27ae60',ppt:'#e67e22',pptx:'#e67e22',
@@ -234,8 +239,6 @@ async function loadDoc() {
     const data: any = await get(`/api/documents/${route.params.id}`)
     doc.value = data
     isFavorited.value = data.is_favorited || false
-    // Use the presigned preview URL from the backend (avoids cross-origin iframe auth issues)
-    previewUrl.value = data.preview_url || ''
     // Load related docs from same category
     if (data.category_id) {
       const resp: any = await get('/api/documents', {

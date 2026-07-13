@@ -6,12 +6,12 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.auth import get_current_user, get_current_user_optional, require_role
+from app.auth import get_current_user, get_current_user_optional, require_role, decode_token
 from app.config import settings
 from app.models.user import User
 from app.models.document import Document
@@ -77,49 +77,6 @@ async def _batch_load_uploaders(db: AsyncSession, docs: list[Document]) -> dict[
 
 # ── Convertible extensions for on-demand preview ─────────────
 _CONVERTIBLE_EXTS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "odp", "ods"}
-
-
-async def _convert_on_demand(doc: Document, db: AsyncSession) -> str | None:
-    """Trigger Gotenberg conversion for a document that has no cached preview.
-    Stores the preview_path on the document for subsequent instant loads."""
-    if doc.file_ext not in _CONVERTIBLE_EXTS:
-        return None
-
-    try:
-        s3 = get_minio_client()
-        bucket_key = doc.original_path[5:]  # strip "s3://"
-        bucket, key = bucket_key.split("/", 1)
-
-        # Read original from MinIO
-        resp = await _run_in_thread(s3.get_object, Bucket=bucket, Key=key)
-        file_content = await _run_in_thread(lambda: resp["Body"].read())
-
-        # Convert via Gotenberg
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            files = {"files": (doc.original_filename, file_content)}
-            convert_resp = await client.post(
-                f"{settings.GOTENBERG_URL}/forms/libreoffice/convert",
-                files=files,
-            )
-            if convert_resp.status_code != 200:
-                logger.warning("On-demand conversion failed for doc %s (status %d)", doc.id, convert_resp.status_code)
-                return None
-
-            # Store preview in MinIO
-            preview_key = f"previews/{_uuid.uuid4()}/{doc.original_filename.rsplit('.', 1)[0]}.pdf"
-            await _run_in_thread(
-                s3.upload_fileobj, BytesIO(convert_resp.content), bucket, preview_key
-            )
-
-        # Persist the preview path so next view is instant
-        doc.preview_path = f"s3://{bucket}/{preview_key}"
-        await db.flush()
-        await db.commit()
-
-        return await FileService.get_preview_url(doc.preview_path, doc.original_filename)
-    except Exception:
-        logger.warning("On-demand conversion failed for doc %s", doc.id, exc_info=True)
-        return None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -207,15 +164,6 @@ async def get_document(
     await db.commit()
     await db.refresh(doc)
 
-    # Generate preview URL (convert on-demand if no cached preview exists)
-    preview_url: str | None = None
-    if doc.file_type != "link":
-        if doc.preview_path:
-            preview_url = await FileService.get_preview_url(doc.preview_path, doc.original_filename)
-        else:
-            # On-demand Gotenberg conversion for files without a cached preview
-            preview_url = await _convert_on_demand(doc, db)
-
     # Load uploader name
     uploader = await db.get(User, doc.uploader_id)
     item = _doc_to_item(doc, uploader)
@@ -224,7 +172,6 @@ async def get_document(
         preview_path=doc.preview_path,
         original_path=doc.original_path,
         download_count=doc.download_count,
-        preview_url=preview_url,
     )
 
 
@@ -349,13 +296,79 @@ async def delete_document(
     return {"message": "文档已删除"}
 
 
+async def _read_from_minio(s3_path: str) -> bytes | None:
+    """Read a file from MinIO and return its content. Returns None on failure."""
+    try:
+        s3 = get_minio_client()
+        bucket_key = s3_path[5:]  # strip "s3://"
+        bucket, key = bucket_key.split("/", 1)
+        resp = await _run_in_thread(s3.get_object, Bucket=bucket, Key=key)
+        return await _run_in_thread(lambda: resp["Body"].read())
+    except Exception:
+        logger.warning("Failed to read from MinIO: %s", s3_path, exc_info=True)
+        return None
+
+
+async def _convert_and_cache(doc: Document, db: AsyncSession) -> bytes | None:
+    """Convert a document to PDF via Gotenberg, cache the result, return the PDF bytes."""
+    content = await _read_from_minio(doc.original_path)
+    if not content:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            files = {"files": (doc.original_filename, content)}
+            resp = await client.post(
+                f"{settings.GOTENBERG_URL}/forms/libreoffice/convert",
+                files=files,
+            )
+            if resp.status_code != 200:
+                logger.warning("Gotenberg returned %d for doc %s", resp.status_code, doc.id)
+                return None
+
+            # Cache the preview in MinIO
+            s3 = get_minio_client()
+            bucket_key = doc.original_path[5:]
+            bucket, _ = bucket_key.split("/", 1)
+            preview_key = f"previews/{_uuid.uuid4()}/{doc.original_filename.rsplit('.', 1)[0]}.pdf"
+            await _run_in_thread(s3.upload_fileobj, BytesIO(resp.content), bucket, preview_key)
+
+            doc.preview_path = f"s3://{bucket}/{preview_key}"
+            await db.flush()
+            await db.commit()
+
+            return resp.content
+    except Exception:
+        logger.warning("On-demand conversion failed for doc %s", doc.id, exc_info=True)
+        return None
+
+
 @router.get("/{document_id}/preview")
 async def preview_document(
     document_id: str,
+    token: str = Query("", description="JWT token for iframe auth (since iframes don't send headers)"),
     db: AsyncSession = Depends(get_db),
-    current_user: User | None = Depends(get_current_user_optional),
 ):
-    """Return a presigned URL for inline preview (PDF in browser, not download)."""
+    """Stream a PDF preview directly to the browser (proxied from MinIO).
+
+    Accepts token via query parameter because browser iframe requests
+    don't carry the Authorization header.
+    """
+    from fastapi.responses import StreamingResponse
+
+    # Authenticate via token query param (fallback to header for backward compat)
+    if token:
+        try:
+            payload = decode_token(token)
+        except HTTPException:
+            raise HTTPException(status_code=401, detail="无效的预览令牌")
+        current_user = await db.get(User, payload["sub"])
+        if not current_user or not current_user.is_active:
+            raise HTTPException(status_code=403, detail="用户不存在或已停用")
+    else:
+        # No token at all → guest
+        current_user = None
+
     doc: Document | None = await db.get(Document, _uuid.UUID(document_id))
     if not doc or doc.is_deleted:
         raise HTTPException(status_code=404, detail="文档不存在")
@@ -364,6 +377,7 @@ async def preview_document(
     if not await perm.can_view_document(doc):
         raise HTTPException(status_code=403, detail="无权查看该文档")
 
+    # Link-type documents → redirect to external URL
     if doc.file_type == "link":
         target_url = doc.source_url or doc.original_path
         parsed = urlparse(target_url)
@@ -373,44 +387,27 @@ async def preview_document(
             raise HTTPException(status_code=400, detail="不支持的外部链接")
         return RedirectResponse(url=target_url)
 
-    # If preview exists, use it; otherwise convert on-demand
+    # Determine which file to stream (cached preview, or convert on-demand)
+    preview_content: bytes | None = None
     if doc.preview_path:
-        preview_url = await FileService.get_preview_url(doc.preview_path, doc.original_filename)
-        return RedirectResponse(url=preview_url)
+        # Use cached preview PDF
+        preview_content = await _read_from_minio(doc.preview_path)
+    elif doc.file_ext in _CONVERTIBLE_EXTS:
+        # Convert on-demand via Gotenberg
+        preview_content = await _convert_and_cache(doc, db)
 
-    # On-demand conversion via Gotenberg
-    try:
-        s3 = get_minio_client()
-        bucket_key = doc.original_path[5:]  # strip "s3://"
-        bucket, key = bucket_key.split("/", 1)
+    if preview_content:
+        return StreamingResponse(
+            BytesIO(preview_content),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{doc.title}.pdf"'},
+        )
 
-        # Read original file from MinIO (offload to thread)
-        resp = await _run_in_thread(s3.get_object, Bucket=bucket, Key=key)
-        file_content = await _run_in_thread(lambda: resp["Body"].read())
-
-        # Convert via Gotenberg
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            files = {"files": (doc.original_filename, file_content)}
-            convert_resp = await client.post(
-                f"{settings.GOTENBERG_URL}/forms/libreoffice/convert",
-                files=files,
-            )
-            if convert_resp.status_code == 200:
-                preview_key = f"previews/{_uuid.uuid4()}/{doc.original_filename.rsplit('.', 1)[0]}.pdf"
-                await _run_in_thread(
-                    s3.upload_fileobj, BytesIO(convert_resp.content), bucket, preview_key
-                )
-                doc.preview_path = f"s3://{bucket}/{preview_key}"
-                await db.flush()
-                await db.commit()
-
-                preview_url = await FileService.get_preview_url(doc.preview_path, doc.original_filename)
-                return RedirectResponse(url=preview_url)
-    except Exception:
-        logger.warning("Preview conversion failed for doc %s", document_id, exc_info=True)
-
-    # Fallback: redirect to download
-    return RedirectResponse(url=f"/api/documents/{document_id}/download")
+    # Last resort: redirect to raw file download
+    if doc.original_path.startswith("s3://"):
+        url = await FileService.get_download_url(doc.original_path, doc.original_filename)
+        return RedirectResponse(url=url)
+    raise HTTPException(status_code=400, detail="该文档不支持在线预览")
 
 
 @router.get("/{document_id}/download")
