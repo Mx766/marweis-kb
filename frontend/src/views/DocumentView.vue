@@ -178,13 +178,20 @@ const AUD_EXTS = ['mp3','wav','wma','flac','ogg']
 const isImage = computed(() => IMG_EXTS.includes(doc.value?.file_ext?.toLowerCase() || ''))
 const isVideo = computed(() => VID_EXTS.includes(doc.value?.file_ext?.toLowerCase() || ''))
 const isAudio = computed(() => AUD_EXTS.includes(doc.value?.file_ext?.toLowerCase() || ''))
-// Preview URL with token query param for iframe auth
-const previewUrl = computed(() => {
-  if (!doc.value) return ''
-  const token = auth.token
-  const qs = token ? `?token=${encodeURIComponent(token)}` : ''
-  return `/api/documents/${doc.value.id}/preview${qs}`
-})
+// Preview URL with short-lived scoped token (not the full JWT)
+const previewUrl = ref('')
+const previewToken = ref('')
+
+async function fetchPreviewToken(docId: string) {
+  if (!auth.isLoggedIn) return
+  try {
+    const resp: any = await get(`/api/documents/${docId}/preview-token`)
+    previewToken.value = resp.token
+    previewUrl.value = `/api/documents/${docId}/preview?token=${encodeURIComponent(resp.token)}`
+  } catch {
+    previewUrl.value = ''
+  }
+}
 
 const fileColors: Record<string,string> = {
   pdf:'#e74c3c',doc:'#2980b9',docx:'#2980b9',xls:'#27ae60',xlsx:'#27ae60',ppt:'#e67e22',pptx:'#e67e22',
@@ -239,6 +246,10 @@ async function loadDoc() {
     const data: any = await get(`/api/documents/${route.params.id}`)
     doc.value = data
     isFavorited.value = data.is_favorited || false
+    // Fetch a short-lived scoped preview token (not the full JWT)
+    if (data.file_type !== 'link') {
+      await fetchPreviewToken(data.id)
+    }
     // Load related docs from same category
     if (data.category_id) {
       const resp: any = await get('/api/documents', {

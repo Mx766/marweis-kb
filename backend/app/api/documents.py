@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid as _uuid
+from datetime import datetime, timezone
 from io import BytesIO
 from urllib.parse import urlparse
 
@@ -356,17 +357,21 @@ async def preview_document(
     """
     from fastapi.responses import StreamingResponse
 
-    # Authenticate via token query param (fallback to header for backward compat)
+    # Authenticate via preview token (scoped, short-lived) or full JWT
     if token:
         try:
             payload = decode_token(token)
         except HTTPException:
             raise HTTPException(status_code=401, detail="无效的预览令牌")
+        # Accept both scoped preview tokens and full JWT tokens
+        if payload.get("scope") == "preview":
+            # Scoped token: verify it's for THIS document
+            if payload.get("doc") != document_id:
+                raise HTTPException(status_code=403, detail="预览令牌与文档不匹配")
         current_user = await db.get(User, payload["sub"])
         if not current_user or not current_user.is_active:
             raise HTTPException(status_code=403, detail="用户不存在或已停用")
     else:
-        # No token at all → guest
         current_user = None
 
     doc: Document | None = await db.get(Document, _uuid.UUID(document_id))
@@ -397,10 +402,12 @@ async def preview_document(
         preview_content = await _convert_and_cache(doc, db)
 
     if preview_content:
+        # Sanitize filename to ASCII-safe for Content-Disposition header
+        safe_name = doc.title.encode("ascii", errors="ignore").decode("ascii").strip() or "document"
         return StreamingResponse(
             BytesIO(preview_content),
             media_type="application/pdf",
-            headers={"Content-Disposition": f'inline; filename="{doc.title}.pdf"'},
+            headers={"Content-Disposition": f'inline; filename="{safe_name}.pdf"'},
         )
 
     # Last resort: redirect to raw file download
@@ -408,6 +415,37 @@ async def preview_document(
         url = await FileService.get_download_url(doc.original_path, doc.original_filename)
         return RedirectResponse(url=url)
     raise HTTPException(status_code=400, detail="该文档不支持在线预览")
+
+
+@router.get("/{document_id}/preview-token")
+async def get_preview_token(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate a short-lived, single-document preview token for iframe auth.
+
+    Avoids exposing the full JWT in the URL query string."""
+    doc: Document | None = await db.get(Document, _uuid.UUID(document_id))
+    if not doc or doc.is_deleted:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    perm = PermissionService(db, current_user)
+    if not await perm.can_view_document(doc):
+        raise HTTPException(status_code=403, detail="无权查看该文档")
+
+    # Create a short-lived token scoped to this document
+    from datetime import timedelta
+    expire = datetime.now(timezone.utc) + timedelta(minutes=5)
+    payload = {
+        "sub": str(current_user.id),
+        "doc": document_id,
+        "exp": expire,
+        "scope": "preview",
+    }
+    from jose import jwt
+    token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return {"token": token}
 
 
 @router.get("/{document_id}/download")
