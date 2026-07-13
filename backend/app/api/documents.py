@@ -239,3 +239,32 @@ async def delete_document(
     await db.flush()
     await db.commit()
     return {"message": "文档已删除"}
+
+
+@router.get("/{document_id}/download")
+async def download_document(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+):
+    """Return a presigned URL for direct file download from MinIO."""
+    from fastapi.responses import RedirectResponse
+
+    doc: Document | None = await db.get(Document, _uuid.UUID(document_id))
+    if not doc or doc.is_deleted:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    perm = PermissionService(db, current_user)
+    if not await perm.can_view_document(doc):
+        raise HTTPException(status_code=403, detail="无权下载该文档")
+
+    if doc.file_type == "link":
+        raise HTTPException(status_code=400, detail="链接型文档不支持下载")
+
+    # Increment download count
+    doc.download_count += 1
+    await db.flush()
+    await db.commit()
+
+    download_url = FileService.get_download_url(doc.original_path, doc.original_filename)
+    return RedirectResponse(url=download_url)
