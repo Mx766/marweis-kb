@@ -1,3 +1,4 @@
+import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -6,6 +7,14 @@ from pathlib import Path
 from app.config import settings
 from app.api import auth, categories, documents, search, personal, admin
 from app.middleware.error_handler import global_exception_handler
+from app.middleware.logging import request_logging_middleware
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION)
 
@@ -17,6 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.middleware("http")(request_logging_middleware)
 app.add_exception_handler(Exception, global_exception_handler)
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])

@@ -1,5 +1,7 @@
+import re
 from datetime import datetime, timedelta, timezone
-import bcrypt
+
+from passlib.context import CryptContext
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -10,15 +12,32 @@ from app.database import get_db
 from app.models.user import User
 
 security = HTTPBearer()
+_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# ── Password strength ──────────────────────────────────────
+_MIN_PASSWORD_LENGTH = 8
 
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return _pwd_context.hash(password)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    return _pwd_context.verify(plain, hashed)
 
+
+def validate_password_strength(password: str) -> str | None:
+    """Return an error message if the password is too weak, or None if valid."""
+    if len(password) < _MIN_PASSWORD_LENGTH:
+        return f"密码长度不能少于 {_MIN_PASSWORD_LENGTH} 位"
+    if not re.search(r"[A-Za-z]", password):
+        return "密码必须包含至少一个字母"
+    if not re.search(r"\d", password):
+        return "密码必须包含至少一个数字"
+    return None
+
+
+# ── Token ───────────────────────────────────────────────────
 
 def create_token(user_id: str, expire_hours: int | None = None) -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=expire_hours or settings.JWT_EXPIRE_HOURS)
@@ -32,6 +51,8 @@ def decode_token(token: str) -> dict:
     except JWTError:
         raise HTTPException(status_code=401, detail="无效或过期的认证令牌")
 
+
+# ── Dependencies ────────────────────────────────────────────
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),

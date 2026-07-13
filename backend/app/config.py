@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Literal
 
@@ -19,31 +18,41 @@ class Settings(BaseSettings):
     ENVIRONMENT: Literal["development", "production"] = "development"
 
     # ── Database ───────────────────────────────────────
-    DATABASE_URL: str = (
-        f"postgresql+asyncpg://"
-        f"{os.getenv('DB_USER', 'marweis')}:{os.getenv('DB_PASSWORD', 'change-me')}"
-        f"@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}"
-        f"/{os.getenv('DB_NAME', 'marweis_kb')}"
-    )
+    DB_USER: str = "marweis"
+    DB_PASSWORD: str = "change-me"
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 5432
+    DB_NAME: str = "marweis_kb"
+
+    @property
+    def DATABASE_URL(self) -> str:
+        return (
+            f"postgresql+asyncpg://"
+            f"{self.DB_USER}:{self.DB_PASSWORD}"
+            f"@{self.DB_HOST}:{self.DB_PORT}"
+            f"/{self.DB_NAME}"
+        )
 
     # ── JWT ────────────────────────────────────────────
-    JWT_SECRET: str = os.getenv("JWT_SECRET", "change-me-in-production-use-random-string")
+    JWT_SECRET: str = "change-me-in-production-use-random-string"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_HOURS: int = 8
 
     # ── Meilisearch ────────────────────────────────────
-    MEILI_URL: str = os.getenv("MEILI_URL", "http://localhost:7700")
-    MEILI_MASTER_KEY: str = os.getenv("MEILI_MASTER_KEY", "change-me")
+    MEILI_URL: str = "http://localhost:7700"
+    MEILI_MASTER_KEY: str = "change-me"
 
     # ── MinIO ──────────────────────────────────────────
-    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
-    MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "change-me")
-    MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "change-me")
-    MINIO_BUCKET: str = os.getenv("MINIO_BUCKET", "marweis-documents")
-    MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
+    MINIO_ENDPOINT: str = "localhost:9000"
+    MINIO_PUBLIC_ENDPOINT: str = ""  # 公网访问地址，留空则等于 MINIO_ENDPOINT
+    MINIO_ACCESS_KEY: str = "change-me"
+    MINIO_SECRET_KEY: str = "change-me"
+    MINIO_BUCKET: str = "marweis-documents"
+    MINIO_SECURE: bool = False
+    MINIO_PRESIGNED_EXPIRES: int = 3600  # 预签名 URL 有效期(秒)
 
     # ── Gotenberg ──────────────────────────────────────
-    GOTENBERG_URL: str = os.getenv("GOTENBERG_URL", "http://localhost:3000")
+    GOTENBERG_URL: str = "http://localhost:3000"
 
     # ── File upload ────────────────────────────────────
     MAX_UPLOAD_SIZE_MB: int = 500

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user, get_current_user_optional
@@ -9,7 +9,7 @@ from app.models.category import Category
 from app.schemas import SearchResult
 from app.permissions import PermissionService
 from app.services.search_service import search_documents
-from app.api.documents import _doc_to_item
+from app.api.documents import _doc_to_item, _batch_load_uploaders
 import uuid as _uuid
 
 router = APIRouter()
@@ -37,7 +37,7 @@ async def search(
         allowed_cat_ids = [str(v) for v in visible]
 
     # Try Meilisearch first, fall back to SQL LIKE
-    result = search_documents(
+    result = await search_documents(
         query=q,
         page=page,
         size=size,
@@ -47,13 +47,24 @@ async def search(
     )
 
     if result["hits"]:
-        # Map Meilisearch results to DocumentItem
+        # Batch-load all documents by IDs in a single query (eliminates N+1)
+        doc_ids = [_uuid.UUID(hit["id"]) for hit in result["hits"]]
+        docs_result = await db.execute(
+            select(Document).where(Document.id.in_(doc_ids), Document.is_deleted == False)
+        )
+        doc_map = {doc.id: doc for doc in docs_result.scalars().all()}
+
+        # Batch-load uploaders
+        docs_list = list(doc_map.values())
+        uploader_map = await _batch_load_uploaders(db, docs_list)
+
+        # Preserve Meilisearch result order
         items = []
-        for hit in result["hits"]:
-            doc_id = hit["id"]
-            doc = await db.get(Document, _uuid.UUID(doc_id))
-            if doc and not doc.is_deleted:
-                items.append(await _doc_to_item(doc, db))
+        for doc_id in doc_ids:
+            doc = doc_map.get(doc_id)
+            if doc:
+                items.append(_doc_to_item(doc, uploader_map.get(doc.uploader_id)))
+
         return SearchResult(
             items=items,
             total=result["total"],
@@ -73,8 +84,6 @@ async def search(
     if file_type:
         conditions.append(Document.file_type == file_type)
     if tag:
-        from sqlalchemy import cast, String
-        # Search for tag in JSON array by string-matching the tags column
         conditions.append(
             cast(Document.tags, String).ilike(f"%{tag}%")
         )
@@ -85,10 +94,13 @@ async def search(
     count_query = select(func.count(Document.id)).where(*conditions)
 
     total = (await db.execute(count_query)).scalar()
-    result = await db.execute(query_obj.offset((page - 1) * size).limit(size))
-    docs = result.scalars().all()
+    result_docs = await db.execute(query_obj.offset((page - 1) * size).limit(size))
+    docs = result_docs.scalars().all()
 
-    items = [await _doc_to_item(doc, db) for doc in docs]
+    # Batch-load uploaders (eliminates N+1)
+    uploader_map = await _batch_load_uploaders(db, docs)
+    items = [_doc_to_item(doc, uploader_map.get(doc.uploader_id)) for doc in docs]
+
     return SearchResult(
         items=items,
         total=total,

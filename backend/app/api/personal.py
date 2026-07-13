@@ -6,61 +6,74 @@ from app.auth import get_current_user
 from app.models.user import User
 from app.models.document import Document
 from app.models.favorite import Favorite, BrowseHistory
-from app.schemas import DocumentItem, PersonalStats
-from app.api.documents import _doc_to_item
+from app.schemas import DocumentItem, PersonalStats, DocumentListResponse
+from app.api.documents import _doc_to_item, _batch_load_uploaders
 import uuid as _uuid
 
 router = APIRouter()
 
 
-@router.get("/uploads")
+@router.get("/uploads", response_model=DocumentListResponse)
 async def my_uploads(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    base_cond = [Document.uploader_id == current_user.id, Document.is_deleted == False]
+
     query = (
         select(Document)
-        .where(Document.uploader_id == current_user.id, Document.is_deleted == False)
+        .where(*base_cond)
         .order_by(Document.created_at.desc())
     )
-    count_query = (
-        select(func.count(Document.id))
-        .where(Document.uploader_id == current_user.id, Document.is_deleted == False)
-    )
+    count_query = select(func.count(Document.id)).where(*base_cond)
+
     total = (await db.execute(count_query)).scalar()
     result = await db.execute(query.offset((page - 1) * size).limit(size))
     docs = result.scalars().all()
 
-    items = [await _doc_to_item(doc, db) for doc in docs]
-    return {"items": items, "total": total, "page": page, "size": size}
+    uploader_map = await _batch_load_uploaders(db, docs)
+    items = [_doc_to_item(doc, uploader_map.get(doc.uploader_id)) for doc in docs]
+
+    return DocumentListResponse(
+        items=items, total=total, page=page, size=size,
+        pages=max(1, (total + size - 1) // size),
+    )
 
 
-@router.get("/favorites")
+@router.get("/favorites", response_model=DocumentListResponse)
 async def my_favorites(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    base_cond = [Favorite.user_id == current_user.id, Document.is_deleted == False]
+
     query = (
         select(Document)
         .join(Favorite, Favorite.document_id == Document.id)
-        .where(Favorite.user_id == current_user.id, Document.is_deleted == False)
+        .where(*base_cond)
         .order_by(Favorite.created_at.desc())
     )
     count_query = (
         select(func.count(Document.id))
         .join(Favorite, Favorite.document_id == Document.id)
-        .where(Favorite.user_id == current_user.id, Document.is_deleted == False)
+        .where(*base_cond)
     )
+
     total = (await db.execute(count_query)).scalar()
     result = await db.execute(query.offset((page - 1) * size).limit(size))
     docs = result.scalars().all()
 
-    items = [await _doc_to_item(doc, db) for doc in docs]
-    return {"items": items, "total": total, "page": page, "size": size}
+    uploader_map = await _batch_load_uploaders(db, docs)
+    items = [_doc_to_item(doc, uploader_map.get(doc.uploader_id)) for doc in docs]
+
+    return DocumentListResponse(
+        items=items, total=total, page=page, size=size,
+        pages=max(1, (total + size - 1) // size),
+    )
 
 
 @router.post("/favorites/{document_id}")
@@ -106,33 +119,41 @@ async def remove_favorite(
     return {"message": "已取消收藏"}
 
 
-@router.get("/history")
+@router.get("/history", response_model=DocumentListResponse)
 async def my_history(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    base_cond = [BrowseHistory.user_id == current_user.id, Document.is_deleted == False]
+
     query = (
         select(Document)
         .join(BrowseHistory, BrowseHistory.document_id == Document.id)
-        .where(BrowseHistory.user_id == current_user.id, Document.is_deleted == False)
+        .where(*base_cond)
         .order_by(BrowseHistory.created_at.desc())
     )
     count_query = (
         select(func.count(Document.id))
         .join(BrowseHistory, BrowseHistory.document_id == Document.id)
-        .where(BrowseHistory.user_id == current_user.id, Document.is_deleted == False)
+        .where(*base_cond)
     )
+
     total = (await db.execute(count_query)).scalar()
     result = await db.execute(query.offset((page - 1) * size).limit(size))
     docs = result.scalars().all()
 
-    items = [await _doc_to_item(doc, db) for doc in docs]
-    return {"items": items, "total": total, "page": page, "size": size}
+    uploader_map = await _batch_load_uploaders(db, docs)
+    items = [_doc_to_item(doc, uploader_map.get(doc.uploader_id)) for doc in docs]
+
+    return DocumentListResponse(
+        items=items, total=total, page=page, size=size,
+        pages=max(1, (total + size - 1) // size),
+    )
 
 
-@router.get("/stats")
+@router.get("/stats", response_model=PersonalStats)
 async def personal_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),

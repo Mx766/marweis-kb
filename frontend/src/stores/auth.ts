@@ -20,7 +20,13 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = data.token
     user.value = data.user
     localStorage.setItem('token', data.token)
-    router.push('/')
+    // Redirect to the original page — only allow safe relative paths
+    const redirectParam = new URLSearchParams(window.location.search).get('redirect')
+    let redirect = '/'
+    if (redirectParam && redirectParam.startsWith('/') && !redirectParam.startsWith('//')) {
+      redirect = redirectParam
+    }
+    router.push(redirect)
   }
 
   async function fetchMe() {

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user, get_current_user_optional, require_role
@@ -37,19 +37,32 @@ async def list_categories(
     current_user: User | None = Depends(get_current_user_optional),
 ):
     if current_user is None:
-        # Show only public categories (no visible_departments set)
+        # Guest: show only public categories (SQL-level filter)
         result = await db.execute(
-            select(Category).order_by(Category.sort_order)
+            select(Category)
+            .where(Category.visible_departments.is_(None))
+            .order_by(Category.sort_order)
         )
-        all_cats = result.scalars().all()
-        public_cats = [c for c in all_cats if c.visible_departments is None]
-        return _build_tree(public_cats)
-    perm = PermissionService(db, current_user)
-    visible_ids = await perm.get_visible_category_ids()
-    result = await db.execute(select(Category).order_by(Category.sort_order))
-    all_cats = result.scalars().all()
-    visible_cats = [c for c in all_cats if c.id in visible_ids]
-    return _build_tree(visible_cats)
+        return _build_tree(result.scalars().all())
+
+    if current_user.role == "super_admin":
+        # Admin: show all categories
+        result = await db.execute(select(Category).order_by(Category.sort_order))
+        return _build_tree(result.scalars().all())
+
+    # Non-admin user: public + department-specific + wildcard (SQL-level filter)
+    result = await db.execute(
+        select(Category)
+        .where(
+            or_(
+                Category.visible_departments.is_(None),
+                Category.visible_departments.contains([current_user.department]),
+                Category.visible_departments.contains(["*"]),
+            )
+        )
+        .order_by(Category.sort_order)
+    )
+    return _build_tree(result.scalars().all())
 
 
 @router.post("")

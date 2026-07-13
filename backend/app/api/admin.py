@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.auth import get_current_user, require_role, hash_password
+from app.auth import get_current_user, require_role, hash_password, validate_password_strength
 from app.config import DEPARTMENTS, ROLES
 from app.models.user import User
 from app.schemas import UserCreate, UserUpdate, UserItem, UserListResponse
@@ -60,6 +60,11 @@ async def create_user(
     existing = (await db.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="用户名已存在")
+
+    # Validate password strength
+    pw_error = validate_password_strength(body.password)
+    if pw_error:
+        raise HTTPException(status_code=400, detail=pw_error)
 
     # Validate department and role
     if body.department not in DEPARTMENTS:

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import threading
 import meilisearch
@@ -15,7 +16,8 @@ def _escape_meili_filter_value(value: str) -> str:
     return value.replace("'", "\\'")
 
 
-def get_search_client():
+def _get_search_client_sync():
+    """Get or create the Meilisearch client (sync, thread-safe)."""
     global _client
     if _client is None:
         with _lock:
@@ -40,38 +42,44 @@ def get_search_client():
     return _client
 
 
-def index_document(doc: Document):
-    """Add or update a document in Meilisearch index."""
+async def index_document(doc: Document):
+    """Add or update a document in Meilisearch index (async-safe)."""
     try:
-        client = get_search_client()
-        client.index("documents").add_documents([{
-            "id": str(doc.id),
-            "title": doc.title,
-            "content": doc.summary or "",
-            "tags": doc.tags or [],
-            "summary": doc.summary or "",
-            "category_id": str(doc.category_id) if doc.category_id else None,
-            "file_type": doc.file_type,
-            "file_ext": doc.file_ext,
-            "uploader_id": str(doc.uploader_id),
-            "source": doc.source or "",
-            "created_at": doc.created_at.isoformat() if doc.created_at else "",
-            "updated_at": doc.updated_at.isoformat() if doc.updated_at else "",
-        }])
+        client = _get_search_client_sync()
+        await asyncio.to_thread(
+            client.index("documents").add_documents,
+            [{
+                "id": str(doc.id),
+                "title": doc.title,
+                "content": doc.summary or "",
+                "tags": doc.tags or [],
+                "summary": doc.summary or "",
+                "category_id": str(doc.category_id) if doc.category_id else None,
+                "file_type": doc.file_type,
+                "file_ext": doc.file_ext,
+                "uploader_id": str(doc.uploader_id),
+                "source": doc.source or "",
+                "created_at": doc.created_at.isoformat() if doc.created_at else "",
+                "updated_at": doc.updated_at.isoformat() if doc.updated_at else "",
+            }],
+        )
     except Exception:
         logger.warning("Failed to index document in Meilisearch", exc_info=True)
 
 
-def remove_document(doc_id: str):
-    """Remove a document from Meilisearch index."""
+async def remove_document(doc_id: str):
+    """Remove a document from Meilisearch index (async-safe)."""
     try:
-        client = get_search_client()
-        client.index("documents").delete_document(doc_id)
+        client = _get_search_client_sync()
+        await asyncio.to_thread(
+            client.index("documents").delete_document,
+            doc_id,
+        )
     except Exception:
         logger.warning("Failed to remove document from Meilisearch", exc_info=True)
 
 
-def search_documents(
+async def search_documents(
     query: str,
     page: int = 1,
     size: int = 20,
@@ -79,32 +87,35 @@ def search_documents(
     file_type: str | None = None,
     allowed_category_ids: list[str] | None = None,
 ) -> dict:
-    """Search Meilisearch and return results with total count."""
+    """Search Meilisearch and return results with total count (async-safe)."""
     try:
-        client = get_search_client()
-        filter_parts = []
+        client = _get_search_client_sync()
 
-        if category_id:
-            filter_parts.append(f"category_id = '{_escape_meili_filter_value(category_id)}'")
-        if file_type:
-            filter_parts.append(f"file_type = '{_escape_meili_filter_value(file_type)}'")
-        if allowed_category_ids:
-            cat_filter = " OR ".join(
-                [f"category_id = '{_escape_meili_filter_value(cid)}'" for cid in allowed_category_ids]
+        def _do_search():
+            filter_parts = []
+            if category_id:
+                filter_parts.append(f"category_id = '{_escape_meili_filter_value(category_id)}'")
+            if file_type:
+                filter_parts.append(f"file_type = '{_escape_meili_filter_value(file_type)}'")
+            if allowed_category_ids:
+                cat_filter = " OR ".join(
+                    [f"category_id = '{_escape_meili_filter_value(cid)}'" for cid in allowed_category_ids]
+                )
+                filter_parts.append(f"({cat_filter})")
+
+            filter_str = " AND ".join(filter_parts) if filter_parts else None
+
+            return client.index("documents").search(
+                query or "",
+                {
+                    "filter": filter_str,
+                    "page": page,
+                    "hitsPerPage": size,
+                    "attributesToHighlight": ["title", "content", "summary"],
+                },
             )
-            filter_parts.append(f"({cat_filter})")
 
-        filter_str = " AND ".join(filter_parts) if filter_parts else None
-
-        result = client.index("documents").search(
-            query or "",
-            {
-                "filter": filter_str,
-                "page": page,
-                "hitsPerPage": size,
-                "attributesToHighlight": ["title", "content", "summary"],
-            },
-        )
+        result = await asyncio.to_thread(_do_search)
         return {
             "hits": result["hits"],
             "total": result["estimatedTotalHits"],

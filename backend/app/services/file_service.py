@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import httpx
 import os
@@ -9,8 +10,8 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def _get_minio_client():
-    """Return a boto3 S3 client configured for MinIO."""
+def get_minio_client():
+    """Return a boto3 S3 client configured for MinIO. Public so preview endpoint can reuse it."""
     return boto3.client(
         "s3",
         endpoint_url=f"{'https' if settings.MINIO_SECURE else 'http'}://{settings.MINIO_ENDPOINT}",
@@ -28,6 +29,11 @@ def _ensure_bucket_exists(s3):
         logger.info("Created MinIO bucket: %s", settings.MINIO_BUCKET)
 
 
+async def _run_in_thread(func, *args, **kwargs):
+    """Run a synchronous I/O call in a thread to avoid blocking the event loop."""
+    return await asyncio.to_thread(lambda: func(*args, **kwargs))
+
+
 class FileService:
     """Handles file upload, MinIO storage, and Gotenberg-based document conversion."""
 
@@ -41,12 +47,12 @@ class FileService:
         file_ext = os.path.splitext(original_filename)[1].lower().lstrip(".")
         file_size = len(file_content)
 
-        # 1. Store original in MinIO
-        s3 = _get_minio_client()
-        _ensure_bucket_exists(s3)
+        # 1. Store original in MinIO (offloaded to thread to avoid blocking)
+        s3 = get_minio_client()
+        await _run_in_thread(_ensure_bucket_exists, s3)
 
         object_key = f"originals/{uuid.uuid4()}/{original_filename}"
-        s3.upload_fileobj(BytesIO(file_content), settings.MINIO_BUCKET, object_key)
+        await _run_in_thread(s3.upload_fileobj, BytesIO(file_content), settings.MINIO_BUCKET, object_key)
 
         original_path = f"s3://{settings.MINIO_BUCKET}/{object_key}"
 
@@ -83,11 +89,11 @@ class FileService:
                     )
                     return None
 
-                s3 = _get_minio_client()
-                _ensure_bucket_exists(s3)
+                s3 = get_minio_client()
+                await _run_in_thread(_ensure_bucket_exists, s3)
 
                 preview_key = f"previews/{uuid.uuid4()}/{os.path.splitext(filename)[0]}.pdf"
-                s3.upload_fileobj(BytesIO(response.content), settings.MINIO_BUCKET, preview_key)
+                await _run_in_thread(s3.upload_fileobj, BytesIO(response.content), settings.MINIO_BUCKET, preview_key)
 
                 return f"s3://{settings.MINIO_BUCKET}/{preview_key}"
         except Exception:
@@ -95,24 +101,44 @@ class FileService:
             return None
 
     @staticmethod
-    def get_download_url(object_path: str, filename: str) -> str:
-        """Generate a pre-signed URL for direct download from MinIO."""
+    async def get_download_url(object_path: str, filename: str) -> str:
+        """Generate a pre-signed URL for download (forces browser download dialog)."""
+        return await FileService._presigned_url(object_path, filename, inline=False)
+
+    @staticmethod
+    async def get_preview_url(object_path: str, filename: str) -> str:
+        """Generate a pre-signed URL for inline preview (browser displays, not downloads)."""
+        return await FileService._presigned_url(object_path, filename, inline=True)
+
+    @staticmethod
+    async def _presigned_url(object_path: str, filename: str, *, inline: bool) -> str:
+        """Generate a pre-signed URL for direct access from MinIO."""
         if not object_path.startswith("s3://"):
             return object_path  # External link, return as-is
 
         bucket_key = object_path[5:]  # strip "s3://"
         bucket, key = bucket_key.split("/", 1)
 
-        s3 = _get_minio_client()
+        s3 = get_minio_client()
 
         try:
-            url = s3.generate_presigned_url(
+            params: dict = {"Bucket": bucket, "Key": key}
+            # For download: force browser's save-as dialog.
+            # For preview: omit ContentDisposition so the browser renders inline.
+            if not inline:
+                params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
+
+            url = await _run_in_thread(
+                s3.generate_presigned_url,
                 "get_object",
-                Params={"Bucket": bucket, "Key": key, "ResponseContentDisposition": f'attachment; filename="{filename}"'},
-                ExpiresIn=3600,
+                Params=params,
+                ExpiresIn=settings.MINIO_PRESIGNED_EXPIRES,
             )
-            # Replace localhost with the actual server host so external clients can download
-            url = url.replace("localhost", "192.168.60.175")
+            # Rewrite internal endpoint to public endpoint for external clients
+            public_endpoint = settings.MINIO_PUBLIC_ENDPOINT
+            if public_endpoint:
+                internal_endpoint = settings.MINIO_ENDPOINT
+                url = url.replace(internal_endpoint, public_endpoint)
             return url
         except Exception:
             logger.warning("Failed to generate presigned URL for %s", object_path, exc_info=True)

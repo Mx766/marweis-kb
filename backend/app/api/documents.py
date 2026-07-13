@@ -1,24 +1,49 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+import json
+import logging
+import uuid as _uuid
+from io import BytesIO
+from urllib.parse import urlparse
+
 import httpx
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.database import get_db
 from app.auth import get_current_user, get_current_user_optional, require_role
 from app.config import settings
 from app.models.user import User
 from app.models.document import Document
 from app.models.category import Category
+from app.models.favorite import BrowseHistory
 from app.schemas import DocumentCreate, DocumentUpdate, DocumentItem, DocumentDetail, DocumentListResponse
 from app.permissions import PermissionService, get_permission_service
-from app.services.file_service import FileService
-import uuid as _uuid
-import os
+from app.services.file_service import FileService, get_minio_client, _run_in_thread
+from app.services.search_service import index_document, remove_document
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# ── Pre-computed allowed hosts for link-type document preview ──
+_ALLOWED_PREVIEW_HOSTS: set[str] = {
+    "nmpa.gov.cn", "www.nmpa.gov.cn",
+    "cmde.org.cn", "www.cmde.org.cn",
+    "samr.gov.cn", "www.samr.gov.cn",
+    "fda.gov", "www.fda.gov",
+    "ecfr.gov", "www.ecfr.gov",
+    "eur-lex.europa.eu",
+    "iso.org", "www.iso.org",
+    "maris-reg.com", "www.maris-reg.com",
+}
 
-async def _doc_to_item(doc: Document, db: AsyncSession) -> DocumentItem:
-    uploader = await db.get(User, doc.uploader_id)
+
+def _doc_to_item(doc: Document, uploader: User | None) -> DocumentItem:
+    """Convert a Document ORM instance to a DocumentItem schema.
+
+    Accepts a pre-loaded uploader to avoid N+1 queries — callers should
+    batch-load uploaders before calling this in a loop.
+    """
     return DocumentItem(
         id=str(doc.id),
         title=doc.title,
@@ -40,6 +65,19 @@ async def _doc_to_item(doc: Document, db: AsyncSession) -> DocumentItem:
         updated_at=str(doc.updated_at),
     )
 
+
+async def _batch_load_uploaders(db: AsyncSession, docs: list[Document]) -> dict[_uuid.UUID, User]:
+    """Load all uploaders for a list of documents in a single query."""
+    uploader_ids = {doc.uploader_id for doc in docs}
+    if not uploader_ids:
+        return {}
+    result = await db.execute(select(User).where(User.id.in_(uploader_ids)))
+    return {user.id: user for user in result.scalars().all()}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Document endpoints
+# ═══════════════════════════════════════════════════════════════
 
 @router.get("")
 async def list_documents(
@@ -78,9 +116,10 @@ async def list_documents(
     result = await db.execute(query.offset((page - 1) * size).limit(size))
     docs = result.scalars().all()
 
-    items = []
-    for doc in docs:
-        items.append(await _doc_to_item(doc, db))
+    # Batch-load all uploaders in a single query (eliminates N+1)
+    uploader_map = await _batch_load_uploaders(db, docs)
+
+    items = [_doc_to_item(doc, uploader_map.get(doc.uploader_id)) for doc in docs]
 
     return DocumentListResponse(
         items=items,
@@ -106,14 +145,11 @@ async def get_document(
         raise HTTPException(status_code=403, detail="无权访问该文档")
 
     doc.view_count += 1
-    await db.flush()
 
     # Record browse history if logged in
     if current_user:
-        from app.models.favorite import BrowseHistory
-        from sqlalchemy import select as _sel2
         existing = (await db.execute(
-            _sel2(BrowseHistory).where(
+            select(BrowseHistory).where(
                 BrowseHistory.user_id == current_user.id,
                 BrowseHistory.document_id == doc.id,
             )
@@ -121,10 +157,12 @@ async def get_document(
         if not existing:
             db.add(BrowseHistory(user_id=current_user.id, document_id=doc.id))
 
-    await db.refresh(doc)
     await db.commit()
+    await db.refresh(doc)
 
-    item = await _doc_to_item(doc, db)
+    # Load uploader name
+    uploader = await db.get(User, doc.uploader_id)
+    item = _doc_to_item(doc, uploader)
     return DocumentDetail(
         **item.model_dump(),
         preview_path=doc.preview_path,
@@ -148,7 +186,6 @@ async def create_document(
     current_user: User = Depends(require_role("super_admin", "dept_admin", "editor")),
 ):
     """Upload a file or create a link-based document entry."""
-    import json
     tag_list = json.loads(tags) if isinstance(tags, str) else (tags or [])
 
     if file:
@@ -197,6 +234,10 @@ async def create_document(
     await db.flush()
     await db.refresh(doc)
     await db.commit()
+
+    # Sync to Meilisearch (fire-and-forget — failure is logged but doesn't block)
+    await index_document(doc)
+
     return {"id": str(doc.id), "title": doc.title}
 
 
@@ -220,6 +261,10 @@ async def update_document(
         setattr(doc, key, val)
     await db.flush()
     await db.commit()
+
+    # Sync updated doc to Meilisearch
+    await index_document(doc)
+
     return {"id": str(doc.id), "message": "更新成功"}
 
 
@@ -240,6 +285,10 @@ async def delete_document(
     doc.is_deleted = True
     await db.flush()
     await db.commit()
+
+    # Remove from Meilisearch
+    await remove_document(str(doc.id))
+
     return {"message": "文档已删除"}
 
 
@@ -250,8 +299,6 @@ async def preview_document(
     current_user: User | None = Depends(get_current_user_optional),
 ):
     """Return a presigned URL for inline preview (PDF in browser, not download)."""
-    from fastapi.responses import RedirectResponse
-
     doc: Document | None = await db.get(Document, _uuid.UUID(document_id))
     if not doc or doc.is_deleted:
         raise HTTPException(status_code=404, detail="文档不存在")
@@ -261,50 +308,30 @@ async def preview_document(
         raise HTTPException(status_code=403, detail="无权查看该文档")
 
     if doc.file_type == "link":
-        # Validate redirect target — only allow specific trusted domains
         target_url = doc.source_url or doc.original_path
-        from urllib.parse import urlparse
-
-        # Build set of exact allowed hostnames (pre-computed, no runtime construction)
-        _allowed_hosts = {
-            "nmpa.gov.cn", "www.nmpa.gov.cn",
-            "cmde.org.cn", "www.cmde.org.cn",
-            "samr.gov.cn", "www.samr.gov.cn",
-            "fda.gov", "www.fda.gov",
-            "ecfr.gov", "www.ecfr.gov",
-            "eur-lex.europa.eu",
-            "iso.org", "www.iso.org",
-            "maris-reg.com", "www.maris-reg.com",
-        }
-
         parsed = urlparse(target_url)
         if parsed.scheme not in ("http", "https", ""):
             raise HTTPException(status_code=400, detail="不支持的重定向协议")
-        if parsed.hostname and parsed.hostname not in _allowed_hosts:
+        if parsed.hostname and parsed.hostname not in _ALLOWED_PREVIEW_HOSTS:
             raise HTTPException(status_code=400, detail="不支持的外部链接")
         return RedirectResponse(url=target_url)
 
     # If preview exists, use it; otherwise convert on-demand
     if doc.preview_path:
-        preview_url = FileService.get_download_url(doc.preview_path, doc.original_filename)
-        # For preview, don't force download — let browser display inline
+        preview_url = await FileService.get_preview_url(doc.preview_path, doc.original_filename)
         return RedirectResponse(url=preview_url)
 
     # On-demand conversion via Gotenberg
     try:
-        import boto3
-        s3 = boto3.client(
-            "s3",
-            endpoint_url=f"{'https' if settings.MINIO_SECURE else 'http'}://{settings.MINIO_ENDPOINT}",
-            aws_access_key_id=settings.MINIO_ACCESS_KEY,
-            aws_secret_access_key=settings.MINIO_SECRET_KEY,
-        )
-        bucket_key = doc.original_path[5:]
+        s3 = get_minio_client()
+        bucket_key = doc.original_path[5:]  # strip "s3://"
         bucket, key = bucket_key.split("/", 1)
-        resp = s3.get_object(Bucket=bucket, Key=key)
-        file_content = resp["Body"].read()
 
-        # Convert
+        # Read original file from MinIO (offload to thread)
+        resp = await _run_in_thread(s3.get_object, Bucket=bucket, Key=key)
+        file_content = await _run_in_thread(lambda: resp["Body"].read())
+
+        # Convert via Gotenberg
         async with httpx.AsyncClient(timeout=60.0) as client:
             files = {"files": (doc.original_filename, file_content)}
             convert_resp = await client.post(
@@ -312,19 +339,18 @@ async def preview_document(
                 files=files,
             )
             if convert_resp.status_code == 200:
-                import uuid as _uuid_module
-                preview_key = f"previews/{_uuid_module.uuid4()}/{doc.original_filename.rsplit('.', 1)[0]}.pdf"
-                from io import BytesIO
-                s3.upload_fileobj(BytesIO(convert_resp.content), bucket, preview_key)
+                preview_key = f"previews/{_uuid.uuid4()}/{doc.original_filename.rsplit('.', 1)[0]}.pdf"
+                await _run_in_thread(
+                    s3.upload_fileobj, BytesIO(convert_resp.content), bucket, preview_key
+                )
                 doc.preview_path = f"s3://{bucket}/{preview_key}"
                 await db.flush()
                 await db.commit()
 
-                preview_url = FileService.get_download_url(doc.preview_path, doc.original_filename)
+                preview_url = await FileService.get_preview_url(doc.preview_path, doc.original_filename)
                 return RedirectResponse(url=preview_url)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Preview conversion failed for doc {document_id}: {e}")
+    except Exception:
+        logger.warning("Preview conversion failed for doc %s", document_id, exc_info=True)
 
     # Fallback: redirect to download
     return RedirectResponse(url=f"/api/documents/{document_id}/download")
@@ -337,8 +363,6 @@ async def download_document(
     current_user: User | None = Depends(get_current_user_optional),
 ):
     """Return a presigned URL for direct file download from MinIO."""
-    from fastapi.responses import RedirectResponse
-
     doc: Document | None = await db.get(Document, _uuid.UUID(document_id))
     if not doc or doc.is_deleted:
         raise HTTPException(status_code=404, detail="文档不存在")
@@ -355,5 +379,5 @@ async def download_document(
     await db.flush()
     await db.commit()
 
-    download_url = FileService.get_download_url(doc.original_path, doc.original_filename)
+    download_url = await FileService.get_download_url(doc.original_path, doc.original_filename)
     return RedirectResponse(url=download_url)

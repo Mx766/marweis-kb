@@ -180,7 +180,8 @@ const isVideo = computed(() => VID_EXTS.includes(doc.value?.file_ext?.toLowerCas
 const isAudio = computed(() => AUD_EXTS.includes(doc.value?.file_ext?.toLowerCase() || ''))
 const previewUrl = computed(() => {
   if (!doc.value) return ''
-  return `/api/documents/${doc.value.id}/download`
+  // Use the preview endpoint which handles Gotenberg conversion
+  return `/api/documents/${doc.value.id}/preview`
 })
 
 const fileColors: Record<string,string> = {
@@ -208,10 +209,8 @@ function copyLink() {
 
 function doDownload() {
   if (!doc.value) return
-  const a = document.createElement('a')
-  a.href = `/api/documents/${doc.value.id}/download`
-  a.download = doc.value.original_filename
-  a.click()
+  // Use direct navigation — the backend returns a 307 redirect to the presigned URL
+  window.location.href = `/api/documents/${doc.value.id}/download`
 }
 
 async function toggleFavorite() {

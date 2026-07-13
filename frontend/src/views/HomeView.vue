@@ -79,7 +79,12 @@ const categoryTree = ref<any[]>([])
 const recentDocs = ref<any[]>([])
 
 const colors = ['#1e50ae','#e74c3c','#27ae60','#e67e22','#9b59b6','#3498db','#1abc9c','#e91e63']
-function getIconColor(_name: string, idx?: number) { return colors[(idx ?? 0) % colors.length] }
+function getIconColor(name: string) {
+  // Hash the category name to get a consistent color
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
+  return colors[Math.abs(hash) % colors.length]
+}
 
 function formatDate(d: string) { return dayjs(d).format('YYYY-MM-DD') }
 function search() { if (query.value.trim()) router.push({ path: '/search', query: { q: query.value.trim() } }) }
