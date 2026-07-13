@@ -72,6 +72,8 @@
                   height="700px"
                   style="border:none;border-radius:8px"
                   title="文档预览"
+                  sandbox="allow-scripts allow-same-origin"
+                  referrerpolicy="no-referrer"
                 ></iframe>
               </div>
               <div class="preview-page" :class="{ 'has-preview': previewUrl }">

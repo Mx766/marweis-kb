@@ -261,19 +261,26 @@ async def preview_document(
         raise HTTPException(status_code=403, detail="无权查看该文档")
 
     if doc.file_type == "link":
-        # Validate URL before redirect to prevent open redirect attacks
+        # Validate redirect target — only allow specific trusted domains
         target_url = doc.source_url or doc.original_path
         from urllib.parse import urlparse
+
+        # Build set of exact allowed hostnames (pre-computed, no runtime construction)
+        _allowed_hosts = {
+            "nmpa.gov.cn", "www.nmpa.gov.cn",
+            "cmde.org.cn", "www.cmde.org.cn",
+            "samr.gov.cn", "www.samr.gov.cn",
+            "fda.gov", "www.fda.gov",
+            "ecfr.gov", "www.ecfr.gov",
+            "eur-lex.europa.eu",
+            "iso.org", "www.iso.org",
+            "maris-reg.com", "www.maris-reg.com",
+        }
+
         parsed = urlparse(target_url)
-        if parsed.scheme and parsed.scheme not in ("http", "https"):
+        if parsed.scheme not in ("http", "https", ""):
             raise HTTPException(status_code=400, detail="不支持的重定向协议")
-        if parsed.netloc and not any(
-            parsed.netloc == d or parsed.netloc.endswith("." + d) for d in (
-                "nmpa.gov.cn", "cmde.org.cn", "samr.gov.cn",
-                "fda.gov", "ecfr.gov", "eur-lex.europa.eu",
-                "iso.org", "maris-reg.com",
-            )
-        ):
+        if parsed.hostname and parsed.hostname not in _allowed_hosts:
             raise HTTPException(status_code=400, detail="不支持的外部链接")
         return RedirectResponse(url=target_url)
 
