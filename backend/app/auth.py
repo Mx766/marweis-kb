@@ -23,7 +23,11 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
+    try:
+        return _pwd_context.verify(plain, hashed)
+    except ValueError:
+        # bcrypt may reject malformed or over-length hashes from older versions
+        return False
 
 
 def validate_password_strength(password: str) -> str | None:
