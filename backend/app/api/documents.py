@@ -75,6 +75,53 @@ async def _batch_load_uploaders(db: AsyncSession, docs: list[Document]) -> dict[
     return {user.id: user for user in result.scalars().all()}
 
 
+# ── Convertible extensions for on-demand preview ─────────────
+_CONVERTIBLE_EXTS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "odp", "ods"}
+
+
+async def _convert_on_demand(doc: Document, db: AsyncSession) -> str | None:
+    """Trigger Gotenberg conversion for a document that has no cached preview.
+    Stores the preview_path on the document for subsequent instant loads."""
+    if doc.file_ext not in _CONVERTIBLE_EXTS:
+        return None
+
+    try:
+        s3 = get_minio_client()
+        bucket_key = doc.original_path[5:]  # strip "s3://"
+        bucket, key = bucket_key.split("/", 1)
+
+        # Read original from MinIO
+        resp = await _run_in_thread(s3.get_object, Bucket=bucket, Key=key)
+        file_content = await _run_in_thread(lambda: resp["Body"].read())
+
+        # Convert via Gotenberg
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            files = {"files": (doc.original_filename, file_content)}
+            convert_resp = await client.post(
+                f"{settings.GOTENBERG_URL}/forms/libreoffice/convert",
+                files=files,
+            )
+            if convert_resp.status_code != 200:
+                logger.warning("On-demand conversion failed for doc %s (status %d)", doc.id, convert_resp.status_code)
+                return None
+
+            # Store preview in MinIO
+            preview_key = f"previews/{_uuid.uuid4()}/{doc.original_filename.rsplit('.', 1)[0]}.pdf"
+            await _run_in_thread(
+                s3.upload_fileobj, BytesIO(convert_resp.content), bucket, preview_key
+            )
+
+        # Persist the preview path so next view is instant
+        doc.preview_path = f"s3://{bucket}/{preview_key}"
+        await db.flush()
+        await db.commit()
+
+        return await FileService.get_preview_url(doc.preview_path, doc.original_filename)
+    except Exception:
+        logger.warning("On-demand conversion failed for doc %s", doc.id, exc_info=True)
+        return None
+
+
 # ═══════════════════════════════════════════════════════════════
 # Document endpoints
 # ═══════════════════════════════════════════════════════════════
@@ -160,10 +207,14 @@ async def get_document(
     await db.commit()
     await db.refresh(doc)
 
-    # Generate preview URL inline so frontend can use it directly (avoids iframe auth issues)
+    # Generate preview URL (convert on-demand if no cached preview exists)
     preview_url: str | None = None
-    if doc.file_type != "link" and doc.preview_path:
-        preview_url = await FileService.get_preview_url(doc.preview_path, doc.original_filename)
+    if doc.file_type != "link":
+        if doc.preview_path:
+            preview_url = await FileService.get_preview_url(doc.preview_path, doc.original_filename)
+        else:
+            # On-demand Gotenberg conversion for files without a cached preview
+            preview_url = await _convert_on_demand(doc, db)
 
     # Load uploader name
     uploader = await db.get(User, doc.uploader_id)
