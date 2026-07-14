@@ -70,9 +70,9 @@ const activeModuleId = computed(() => {
 onMounted(async () => {
   try {
     const cats: CategoryNode[] = await get('/api/categories')
-    // Filter: only show categories that have children or have workflow-like structure
+    // Only show workflow-style modules (numbered) + public zone
     modules.value = cats
-      .filter(c => c.children?.length > 0 || c.name.startsWith('1.') || c.name.startsWith('2.') || c.name.startsWith('3.') || c.name.startsWith('4.') || c.name.startsWith('5.') || c.name.startsWith('6.') || c.name.startsWith('7.'))
+      .filter(c => /^\d+\./.test(c.name) || c.name === '公共知识区')
       .sort((a, b) => a.sort_order - b.sort_order)
     // Auto-expand the module containing the active category
     for (const mod of modules.value) {
