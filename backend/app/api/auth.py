@@ -1,4 +1,5 @@
 import time
+import threading
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -11,25 +12,39 @@ from app.schemas import LoginRequest, LoginResponse, RegisterRequest, UserProfil
 
 router = APIRouter()
 
-# Simple in-memory rate limiter for login
-_login_attempts: dict[str, tuple[int, float]] = {}  # client_ip -> (count, window_start)
-_LOGIN_RATE_LIMIT = 10      # max attempts
+# ── Login rate limiter with automatic TTL-based expiry ─────
+_LOGIN_RATE_LIMIT = 10      # max attempts per window
 _LOGIN_RATE_WINDOW = 300    # seconds (5 minutes)
+_CLEANUP_INTERVAL = 600     # background cleanup every 10 minutes
+
+_login_attempts: dict[str, tuple[int, float]] = {}  # client_ip -> (count, window_start)
+_lock = threading.Lock()
+_last_cleanup = time.time()
 
 
 def _check_login_rate_limit(client_ip: str) -> None:
-    """Raise 429 if the client has exceeded the login rate limit."""
+    """Raise 429 if the client has exceeded the login rate limit.
+
+    Uses a simple dict with periodic background cleanup to prevent
+    unbounded memory growth from diverse client IPs.
+    """
+    global _last_cleanup
     now = time.time()
-    # Clean up expired entries periodically
-    expired = [ip for ip, (_, ws) in _login_attempts.items() if now - ws > _LOGIN_RATE_WINDOW]
-    for ip in expired:
-        del _login_attempts[ip]
-    count, window_start = _login_attempts.get(client_ip, (0, now))
-    if now - window_start > _LOGIN_RATE_WINDOW:
-        count, window_start = 0, now
-    if count >= _LOGIN_RATE_LIMIT:
-        raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
-    _login_attempts[client_ip] = (count + 1, window_start)
+
+    with _lock:
+        # Periodic cleanup of all expired entries (not just on new requests)
+        if now - _last_cleanup > _CLEANUP_INTERVAL:
+            expired = [ip for ip, (_, ws) in _login_attempts.items() if now - ws > _LOGIN_RATE_WINDOW]
+            for ip in expired:
+                del _login_attempts[ip]
+            _last_cleanup = now
+
+        count, window_start = _login_attempts.get(client_ip, (0, now))
+        if now - window_start > _LOGIN_RATE_WINDOW:
+            count, window_start = 0, now
+        if count >= _LOGIN_RATE_LIMIT:
+            raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
+        _login_attempts[client_ip] = (count + 1, window_start)
 
 
 @router.post("/login", response_model=LoginResponse)

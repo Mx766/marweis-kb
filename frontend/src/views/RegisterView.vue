@@ -99,7 +99,7 @@ async function handleRegister() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #9a6b04 0%, #c88a04 50%, #e6a817 100%);
+  background: linear-gradient(135deg, #0d3b7a 0%, #1e50ae 50%, #3a7bd5 100%);
 }
 .register-card {
   width: 420px;

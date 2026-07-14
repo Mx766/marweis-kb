@@ -5,6 +5,7 @@ from app.database import get_db
 from app.auth import get_current_user, get_current_user_optional, require_role
 from app.models.user import User
 from app.models.category import Category
+from app.models.document import Document
 from app.schemas import CategoryNode, CategoryCreate, CategoryUpdate
 from app.permissions import PermissionService, get_permission_service
 import uuid as _uuid
@@ -127,6 +128,13 @@ async def delete_category(
     )).scalars().all()
     for child in child_cats:
         child.parent_id = cat.parent_id
+
+    # Orphan documents in this category: set category_id to NULL
+    orphan_docs = (await db.execute(
+        select(Document).where(Document.category_id == cat.id)
+    )).scalars().all()
+    for doc in orphan_docs:
+        doc.category_id = None
 
     await db.delete(cat)
     await db.commit()

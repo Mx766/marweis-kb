@@ -40,10 +40,17 @@ class PermissionService:
         ]
 
     async def can_view_document(self, doc: Document) -> bool:
+        # Unclassified documents (category_id IS NULL) are treated as draft/private:
+        # only super_admin and the uploader can view them.
+        # This prevents accidental exposure of sensitive documents that
+        # haven't been properly categorized yet.
+        if doc.category_id is None:
+            if self.user is None:
+                return False
+            return self.user.role == "super_admin" or doc.uploader_id == self.user.id
+
         if self.user is None:
-            if doc.category_id is None:
-                return True
-            # Check if category is public via a single DB query
+            # Guest: only documents in public categories
             result = await self.db.execute(
                 select(Category.id).where(
                     Category.id == doc.category_id,
@@ -55,8 +62,6 @@ class PermissionService:
         if self.user.role == "super_admin":
             return True
         if doc.uploader_id == self.user.id:
-            return True
-        if doc.category_id is None:
             return True
 
         visible_ids = await self.get_visible_category_ids()

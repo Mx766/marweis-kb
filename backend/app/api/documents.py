@@ -105,10 +105,14 @@ async def list_documents(
     if current_user and current_user.role == "super_admin":
         pass  # Super admin sees all documents — no extra filter needed
     elif visible_ids:
+        # User can see documents in visible categories.
+        # Unclassified docs (category_id IS NULL) are NOT included — they are
+        # private to super_admin and the uploader only (see permissions.py).
         conditions.append(Document.category_id.in_(visible_ids))
     else:
         # User has no visible categories at all — return empty list
-        conditions.append(Document.category_id.is_(None))
+        from sqlalchemy import false as sa_false
+        conditions.append(sa_false())
 
     sort_col = getattr(Document, sort)
     if order == "desc":
@@ -193,6 +197,19 @@ async def create_document(
     """Upload a file or create a link-based document entry."""
     tag_list = json.loads(tags) if isinstance(tags, str) else (tags or [])
 
+    # Validate category_id exists if provided
+    cat_uuid = _uuid.UUID(category_id) if category_id else None
+    if cat_uuid:
+        cat = await db.get(Category, cat_uuid)
+        if not cat:
+            raise HTTPException(status_code=400, detail="指定的分类不存在")
+        # Check that the user's department can access the target category
+        if current_user.role != "super_admin":
+            perm = PermissionService(db, current_user)
+            visible_ids = await perm.get_visible_category_ids()
+            if cat_uuid not in visible_ids:
+                raise HTTPException(status_code=403, detail="无权将文档上传到该分类")
+
     if file:
         # Enforce upload size limit
         if file.size and file.size > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
@@ -265,6 +282,20 @@ async def update_document(
         raise HTTPException(status_code=403, detail="无权编辑该文档")
 
     update_data = body.model_dump(exclude_unset=True)
+
+    # Validate category_id exists if being updated
+    new_cat_id = update_data.get("category_id")
+    if new_cat_id:
+        cat = await db.get(Category, _uuid.UUID(new_cat_id))
+        if not cat:
+            raise HTTPException(status_code=400, detail="指定的分类不存在")
+        # Check that the user's department can access the target category
+        if current_user.role != "super_admin":
+            perm = PermissionService(db, current_user)
+            visible_ids = await perm.get_visible_category_ids()
+            if _uuid.UUID(new_cat_id) not in visible_ids:
+                raise HTTPException(status_code=403, detail="无权将文档移动到该分类")
+
     for key, val in update_data.items():
         setattr(doc, key, val)
     await db.flush()
@@ -381,8 +412,8 @@ async def preview_document(
     if not await perm.can_view_document(doc):
         raise HTTPException(status_code=403, detail="无权查看该文档")
 
-    doc.view_count += 1
-    await db.commit()
+    # NOTE: view_count is already incremented in get_document (detail endpoint).
+    # Incrementing here as well would double-count every page view.
 
     # Link-type documents → redirect to external URL
     if doc.file_type == "link":

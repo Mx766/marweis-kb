@@ -26,7 +26,10 @@
       "Bash(grep -oP '\\(#[0-9a-fA-F]{3,6}\\)')",
       "Bash(python -c \"import json; json.load\\(open\\('.claude/settings.json'\\)\\); print\\('Valid JSON'\\)\")",
       "Bash(git check-ignore *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "WebFetch(domain:www.cmde.org.cn)",
+      "Bash(curl -s -L -k -o /tmp/cmde.html -w \"%{http_code}\" \"https://www.cmde.org.cn/sqrzc/zxfw/lcjtcn/index.html\")",
+      "Bash(cd /tmp && cat cmde.html | sed 's/<[^>]*>/\\\\n/g' | sed '/^[[:space:]]*$/d' | head -150)"
     ]
   }
 }

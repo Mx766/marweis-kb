@@ -67,7 +67,7 @@ onMounted(async () => {
 
 <style scoped>
 .hero-banner {
-  background: linear-gradient(135deg, #c88a04 0%, #9a6b04 100%);
+  background: linear-gradient(135deg, #1e50ae 0%, #0d3b7a 100%);
   border-radius: var(--radius-lg);
   padding: var(--spacing-xl) var(--spacing-lg);
   text-align: center;
@@ -91,10 +91,10 @@ onMounted(async () => {
 .doc-card:hover { box-shadow: var(--shadow-hover); }
 .doc-icon-bg {
   width: 44px; height: 44px;
-  background: #fef3c7;
+  background: #dce8f8;
   border-radius: var(--radius-sm);
   display: flex; align-items: center; justify-content: center;
-  color: #c88a04; flex-shrink: 0;
+  color: var(--color-primary); flex-shrink: 0;
 }
 .doc-body { flex: 1; min-width: 0; }
 .doc-body h4 { font-size: 14px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

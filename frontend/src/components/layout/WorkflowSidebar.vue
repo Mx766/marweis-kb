@@ -134,7 +134,7 @@ function selectSub(subId: string) {
 }
 .dept-icon {
   width: 36px; height: 36px;
-  background: #c88a04;
+  background: var(--color-primary);
   color: #fff;
   border-radius: 8px;
   display: flex;
@@ -170,7 +170,7 @@ function selectSub(subId: string) {
   display: flex; align-items: center; gap: 8px; flex: 1;
   cursor: pointer; padding: 10px 0;
 }
-.module-icon { font-size: 16px; color: #e6a817; flex-shrink: 0; }
+.module-icon { font-size: 16px; color: var(--color-accent); flex-shrink: 0; }
 .module-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .module-children { }
@@ -184,5 +184,5 @@ function selectSub(subId: string) {
   transition: all .15s;
 }
 .sub-item:hover { color: #e2e8f0; background: #334155; }
-.sub-item.active { color: #f5c518; background: #3d2e00; }
+.sub-item.active { color: var(--color-accent); background: #1a3360; }
 </style>

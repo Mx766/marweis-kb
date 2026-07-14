@@ -111,11 +111,22 @@ async function doLoad() {
   loading.value = true
   try {
     const catId = activeSubId.value || (currentCat.value?.id || '')
-    const params: any = { page: page.value, size: size.value, sort: 'updated_at', order: 'desc' }
-    if (catId) params.category_id = catId
-    if (searchKeyword.value) params.keyword = searchKeyword.value
-    if (fileTypeFilter.value) params.file_type = fileTypeFilter.value
-    const resp: any = await get('/api/documents', params)
+    let resp: any
+
+    if (searchKeyword.value.trim()) {
+      // 有搜索词 → 走搜索 API，限定当前分类
+      const params: any = { q: searchKeyword.value.trim(), page: page.value, size: size.value }
+      if (catId) params.category_id = catId
+      if (fileTypeFilter.value) params.file_type = fileTypeFilter.value
+      resp = await get('/api/search', params)
+    } else {
+      // 无搜索词 → 走文档列表 API
+      const params: any = { page: page.value, size: size.value, sort: 'updated_at', order: 'desc' }
+      if (catId) params.category_id = catId
+      if (fileTypeFilter.value) params.file_type = fileTypeFilter.value
+      resp = await get('/api/documents', params)
+    }
+
     docs.value = resp.items || []
     total.value = resp.total || 0
   } catch { docs.value = []; total.value = 0 }
