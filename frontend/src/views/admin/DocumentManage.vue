@@ -51,7 +51,7 @@
             :data="catTree"
             placeholder="选择分类"
             check-strictly
-            :props="{ label: 'name', value: 'id' }"
+            :props="{ label: 'name' }"
             style="width:100%"
           />
         </el-form-item>
@@ -100,7 +100,7 @@
             :data="catTree"
             placeholder="选择分类"
             check-strictly
-            :props="{ label: 'name', value: 'id' }"
+            :props="{ label: 'name' }"
             style="width:100%"
           />
         </el-form-item>
@@ -126,7 +126,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Upload as UploadIcon, Link as LinkIcon } from '@element-plus/icons-vue'
-import { get, post, put, del } from '@/api/client'
+import { get, post, put, del, client } from '@/api/client'
 import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -202,7 +202,7 @@ async function handleUpload() {
       fd.append('file', selectedFile.value)
     }
 
-    await post('/api/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    await client.post('/api/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     ElMessage.success('上传成功')
     uploadVisible.value = false
     loadData()

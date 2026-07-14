@@ -38,10 +38,10 @@ const showSidebar = computed(() => {
 }
 .main-content {
   flex: 1;
-  padding-top: 60px;
+  padding-top: 56px;
 }
 .main-content.with-nav {
-  padding-top: 108px; /* 60px header + 48px navbar */
+  padding-top: 102px; /* 56px header + 46px navbar */
 }
 .content-wrapper {
   max-width: 1300px;

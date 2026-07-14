@@ -74,7 +74,7 @@
             placeholder="不选则为一级分类"
             clearable
             check-strictly
-            :props="{ label: 'name', value: 'id' }"
+            :props="{ label: 'name' }"
             style="width:100%"
           />
         </el-form-item>

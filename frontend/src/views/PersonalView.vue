@@ -97,7 +97,7 @@ async function loadHistory() {
   loading.history = false
 }
 
-function handleTabChange(tab: string) {
+function handleTabChange(tab: string | number) {
   if (tab === 'uploads') loadUploads()
   else if (tab === 'favorites') loadFavorites()
   else if (tab === 'history') loadHistory()
