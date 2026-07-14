@@ -72,6 +72,13 @@ async def create_user(
     if body.role not in ROLES:
         raise HTTPException(status_code=400, detail=f"无效的角色: {body.role}")
 
+    # dept_admin can only create users in their own department with limited roles
+    if current_user.role == "dept_admin":
+        if body.department != current_user.department:
+            raise HTTPException(status_code=403, detail="部门管理员只能在本部门创建用户")
+        if body.role not in ("editor", "employee", "guest"):
+            raise HTTPException(status_code=403, detail="部门管理员只能创建编辑者/员工/访客角色")
+
     user = User(
         username=body.username,
         password_hash=hash_password(body.password),
@@ -98,8 +105,13 @@ async def update_user(
     user = await db.get(User, _uuid.UUID(user_id))
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    if current_user.role == "dept_admin" and user.department != current_user.department:
-        raise HTTPException(status_code=403, detail="无权操作其他部门用户")
+    if current_user.role == "dept_admin":
+        if user.department != current_user.department:
+            raise HTTPException(status_code=403, detail="无权操作其他部门用户")
+        # dept_admin cannot change a user's department to a different one
+        if "department" in body.model_dump(exclude_unset=True):
+            if body.department != current_user.department:
+                raise HTTPException(status_code=403, detail="部门管理员不能将用户转移到其他部门")
 
     update_data = body.model_dump(exclude_unset=True)
 
@@ -108,6 +120,14 @@ async def update_user(
         raise HTTPException(status_code=400, detail=f"无效的部门: {update_data['department']}")
     if "role" in update_data and update_data["role"] not in ROLES:
         raise HTTPException(status_code=400, detail=f"无效的角色: {update_data['role']}")
+
+    # dept_admin cannot escalate user to super_admin or dept_admin
+    if current_user.role == "dept_admin" and "role" in update_data:
+        if update_data["role"] not in ("editor", "employee", "guest"):
+            raise HTTPException(status_code=403, detail="部门管理员不能授予此角色")
+        # dept_admin cannot change role of super_admin or other dept_admins
+        if user.role in ("super_admin", "dept_admin"):
+            raise HTTPException(status_code=403, detail="无权修改管理员角色的用户")
 
     for key, val in update_data.items():
         setattr(user, key, val)

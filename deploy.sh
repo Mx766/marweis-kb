@@ -28,7 +28,7 @@ ssh -o PasswordAuthentication=no "$SERVER" << 'REMOTE'
   sleep 1
   cd backend
   source .venv/bin/activate 2>/dev/null || true
-  nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /home/mx766/logs/backend.log 2>&1 &
+  nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /home/mx766/logs/backend.log 2>&1 &
   echo "    后端已启动 (PID $!)"
 
   echo "[3/3] 完成!"
