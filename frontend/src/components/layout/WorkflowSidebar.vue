@@ -16,12 +16,22 @@
         :class="{ active: isActive(mod) }"
       >
         <!-- Module header -->
-        <div class="module-header" @click="toggleModule(mod)">
-          <el-icon class="module-arrow" :class="{ expanded: expandedModules.has(mod.id) }">
-            <ArrowRight v-if="mod.children?.length" />
+        <div class="module-header">
+          <el-icon
+            class="module-arrow"
+            :class="{ expanded: expandedModules.has(mod.id) }"
+            @click.stop="toggleExpand(mod)"
+            v-if="mod.children?.length"
+          >
+            <ArrowRight />
           </el-icon>
-          <el-icon class="module-icon"><Folder /></el-icon>
-          <span class="module-name">{{ cleanName(mod.name) }}</span>
+          <span
+            class="module-label"
+            @click="navigateToModule(mod)"
+          >
+            <el-icon class="module-icon"><Folder /></el-icon>
+            <span class="module-name">{{ cleanName(mod.name) }}</span>
+          </span>
         </div>
 
         <!-- Sub-categories -->
@@ -84,17 +94,16 @@ function isActive(mod: CategoryNode) {
   return mod.children?.some(s => s.id === activeModuleId.value) || false
 }
 
-function toggleModule(mod: CategoryNode) {
-  if (!mod.children?.length) {
-    // Leaf node: navigate directly
-    router.push(`/category/${mod.id}`)
-    return
-  }
+function toggleExpand(mod: CategoryNode) {
   if (expandedModules.value.has(mod.id)) {
     expandedModules.value.delete(mod.id)
   } else {
     expandedModules.value.add(mod.id)
   }
+}
+
+function navigateToModule(mod: CategoryNode) {
+  router.push(`/category/${mod.id}`)
 }
 
 function selectSub(subId: string) {
@@ -157,6 +166,10 @@ function selectSub(subId: string) {
 .nav-module.active .module-header { color: #f1f5f9; }
 .module-arrow { font-size: 10px; transition: transform .2s; color: #64748b; flex-shrink: 0; width: 12px; }
 .module-arrow.expanded { transform: rotate(90deg); }
+.module-label {
+  display: flex; align-items: center; gap: 8px; flex: 1;
+  cursor: pointer; padding: 10px 0;
+}
 .module-icon { font-size: 16px; color: #e6a817; flex-shrink: 0; }
 .module-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
