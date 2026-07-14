@@ -37,3 +37,7 @@ seed_docs/
 
 # Alembic
 backend/alembic/versions/*.pyc
+
+# Claude Code local config (credentials may appear in permission rules)
+.claude/settings.json
+.claude/settings.local.json

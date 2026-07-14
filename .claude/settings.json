@@ -11,7 +11,22 @@
       "Read(//home/mx766/marweis-kb/backend/app/**)",
       "Bash(ssh mx766@192.168.60.175 \"cat ~/marweis-kb/backend/app/config.py\")",
       "Bash(ssh mx766@192.168.60.175 \"cat ~/marweis-kb/backend/app/auth.py\")",
-      "Bash(ssh mx766@192.168.60.175 \"cat ~/marweis-kb/backend/app/database.py\")"
+      "Bash(ssh mx766@192.168.60.175 \"cat ~/marweis-kb/backend/app/database.py\")",
+      "WebFetch(domain:webcache.googleusercontent.com)",
+      "WebSearch",
+      "WebFetch(domain:www.pharnexcloud.com)",
+      "WebFetch(domain:www.cosmaris.cn)",
+      "WebFetch(domain:www.maris-reg.com)",
+      "Bash(curl -s -L -o /tmp/maris_home.html -w \"%{http_code}\" \"https://www.maris-reg.com/\")",
+      "Bash(curl -s -L -k -o /tmp/maris_home.html -w \"%{http_code}\" \"https://www.maris-reg.com/\")",
+      "Bash(grep -i -E '\\(color|background|font|logo|css|style|brand|#[\\\\w]+\\)' /tmp/maris_home.html | head -100)",
+      "Bash(cat /tmp/maris_home.html | sed 's/<[^>]*>/\\\\n/g' | head -80)",
+      "Read(//d/tmp/**)",
+      "Bash(zcat maris_home.html)",
+      "Bash(grep -oP '\\(#[0-9a-fA-F]{3,6}\\)')",
+      "Bash(python -c \"import json; json.load\\(open\\('.claude/settings.json'\\)\\); print\\('Valid JSON'\\)\")",
+      "Bash(git check-ignore *)",
+      "Bash(git commit *)"
     ]
   }
 }
