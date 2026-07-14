@@ -24,6 +24,7 @@ onMounted(() => auth.fetchMe())
 
 const WORKFLOW_DEPTS = ['器械注册部']
 const showSidebar = computed(() => {
+  if (auth.isAdmin) return true  // super_admin / dept_admin see sidebar
   const dept = auth.user?.department
   return dept ? WORKFLOW_DEPTS.includes(dept) : false
 })
