@@ -1,8 +1,12 @@
 #!/bin/bash
 # Live Test Script for Marweis KB
-# Run on server: bash live_test.sh
+# Usage: ADMIN_PW=xxx DEMO_PW=xxx TEST_PW=xxx bash live_test.sh
+#   or source a .env.test file with the variables set.
 set -e
-BASE="http://127.0.0.1:8000"
+BASE="${BASE:-http://127.0.0.1:8000}"
+ADMIN_PW="${ADMIN_PW:?set ADMIN_PW env var}"
+DEMO_PW="${DEMO_PW:-123456}"
+TEST_PW="${TEST_PW:-test1234}"
 PASS=0
 FAIL=0
 
@@ -32,7 +36,7 @@ echo "─── 1. Authentication ───"
 echo "[1.1] Login with valid admin credentials"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"marweis2026"}')
+  -d '{"username":"admin","password":'"$ADMIN_PW"'}')
 HTTP=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 ADMIN_TOKEN=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])" 2>/dev/null)
@@ -53,7 +57,7 @@ check "Error message" "用户名或密码错误" "$BODY"
 echo "[1.3] Login with non-existent user"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"username":"fakeuser99999","password":"test1234"}')
+  -d '{"username":"fakeuser99999","password":'"$TEST_PW"'}')
 HTTP=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 check "HTTP 401" "401" "$HTTP"
@@ -73,7 +77,7 @@ check "Rate limit triggers (HTTP 429)" "429" "$LAST_CODE"
 echo "[1.5] Self-registration"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/auth/register" \
   -H "Content-Type: application/json" \
-  -d '{"username":"testuser_tmp","display_name":"Test User","department":"器械注册部","password":"test1234"}')
+  -d '{"username":"testuser_tmp","display_name":"Test User","department":"器械注册部","password":'"$TEST_PW"'}')
 HTTP=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 check "HTTP 200" "200" "$HTTP"
@@ -83,7 +87,7 @@ check "Register success message" "注册成功" "$BODY"
 echo "[1.6] Duplicate username registration"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/auth/register" \
   -H "Content-Type: application/json" \
-  -d '{"username":"testuser_tmp","display_name":"Test User 2","department":"器械注册部","password":"test1234"}')
+  -d '{"username":"testuser_tmp","display_name":"Test User 2","department":"器械注册部","password":'"$TEST_PW"'}')
 HTTP=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 check "HTTP 400" "400" "$HTTP"
@@ -102,7 +106,7 @@ check "HTTP 400" "400" "$HTTP"
 echo "[1.8] Invalid department rejected"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/auth/register" \
   -H "Content-Type: application/json" \
-  -d '{"username":"baddep","display_name":"Bad Dept","department":"黑客部","password":"test1234"}')
+  -d '{"username":"baddep","display_name":"Bad Dept","department":"黑客部","password":'"$TEST_PW"'}')
 HTTP=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 check "HTTP 400" "400" "$HTTP"
@@ -239,7 +243,7 @@ echo "[6.2] Create a dept_admin user for testing"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/admin/users" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -d '{"username":"test_dept_admin","password":"test1234","display_name":"Test Dept Admin","department":"器械注册部","role":"dept_admin"}')
+  -d '{"username":"test_dept_admin","password":'"$TEST_PW"',"display_name":"Test Dept Admin","department":"器械注册部","role":"dept_admin"}')
 HTTP=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 check "Create dept_admin HTTP 200" "200" "$HTTP"
@@ -250,7 +254,7 @@ echo "  dept_admin ID: $DEPT_ADMIN_ID"
 echo "[6.3] Login as dept_admin"
 RESP=$(curl -s -X POST "$BASE/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"username":"test_dept_admin","password":"test1234"}')
+  -d '{"username":"test_dept_admin","password":'"$TEST_PW"'}')
 DEPT_TOKEN=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])" 2>/dev/null)
 check "dept_admin login" "True" "$([ -n "$DEPT_TOKEN" ] && echo True || echo False)"
 
