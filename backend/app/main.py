@@ -29,10 +29,23 @@ app.add_middleware(
 app.middleware("http")(request_logging_middleware)
 
 # ── Chrome 142+ Local Network Access fix ──────────────────
+# Only enable this header for local/dev access to avoid weakening security
+_ALLOWED_PRIVATE_ORIGINS = {
+    "http://localhost:8080",
+    "http://localhost:8443",
+    "https://localhost:8443",
+    "http://127.0.0.1:8080",
+    f"http://{settings.MINIO_PUBLIC_ENDPOINT}" if settings.MINIO_PUBLIC_ENDPOINT else "",
+    f"https://{settings.MINIO_PUBLIC_ENDPOINT}" if settings.MINIO_PUBLIC_ENDPOINT else "",
+}
+_ALLOWED_PRIVATE_ORIGINS.discard("")  # Remove empty strings
+
 @app.middleware("http")
 async def add_private_network_header(request: Request, call_next):
     response = await call_next(request)
-    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    origin = request.headers.get("Origin")
+    if origin and origin in _ALLOWED_PRIVATE_ORIGINS:
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
     return response
 
 app.add_exception_handler(Exception, global_exception_handler)
