@@ -1,289 +1,179 @@
-# 迈瑞生知识库 — 项目交接文档
-
-## 概述
-
-迈瑞生知识库 (Marweis KB) 是迈瑞生集团内部的医疗器械注册法规知识管理平台。
-用于存储、搜索和在线预览 NMPA/FDA/CE 审评报告、指导原则、法规文件。
+# 迈瑞生知识库 — 项目交接文档 (2026-07-14)
 
 ## 快速入口
 
 | 项目 | 地址/值 |
 |------|---------|
-| **系统访问** | http://192.168.60.175:8000 |
-| **管理员账号** | admin / marweis2026 |
-| **GitHub 仓库** | https://github.com/Mx766/marweis-kb |
-| **服务器地址** | 192.168.60.175 (SSH: mx766@192.168.60.175) |
-| **本地仓库路径** | d:\workSpace\marweis-kb |
-
----
+| **系统访问** | https://192.168.60.175 (HTTPS) / http://192.168.60.175:8000 已废弃 |
+| **管理员** | 见服务器 .env 或 seed.py |
+| **测试账号** | zhangsan (器械注册部), 密码见 seed.py |
+| **GitHub** | https://github.com/Mx766/marweis-kb |
+| **服务器** | mx766@192.168.60.175 (SSH Key 认证) |
+| **本地仓库** | d:\workSpace\marweis-kb |
 
 ## 服务器信息
 
-| 项 | 详情 |
-|----|------|
-| 硬件 | Lenovo ThinkCentre M730q, Pentium Gold G6400T, 8GB RAM, 240GB SSD |
-| 系统 | Ubuntu 22.04.5 LTS |
-| CPU | 双核四线程 @ 3.40GHz |
-| 磁盘 | 100G 已分配 / 120G 空闲可扩容 (LVM) |
-| SSH | 已配置 Key 认证 |
+Ubuntu 22.04, Lenovo ThinkCentre M730q, 8GB RAM
 
-### Docker 服务
+### 服务端口
 
-| 容器 | 服务 | 端口 |
+| 端口 | 服务 | 说明 |
 |------|------|------|
-| marweis-pg | PostgreSQL 16 + pgvector | 5432 |
-| marweis-meili | Meilisearch 全文搜索 | 7700 |
-| marweis-minio | MinIO 对象存储 | 9000 (API) / 9001 (控制台) |
-| marweis-gotenberg | Gotenberg 文档转 PDF | 3000 |
-| hermes | AI Agent (非知识库组件) | - |
+| 80 | Nginx → 301 HTTPS | HTTP 自动跳转 |
+| 443 | Nginx HTTPS | 反向代理到 8000 |
+| 8000 | uvicorn | 仅监听 127.0.0.1 |
+| 5432 | PostgreSQL 16 | Docker: marweis-pg |
+| 7700 | Meilisearch | Docker: marweis-meili |
+| 9000/9001 | MinIO | Docker: marweis-minio |
+| 3000 | Gotenberg | Docker: marweis-gotenberg |
 
----
+### SSL 证书
 
-## 技术架构
+自签名证书，位置：`/etc/ssl/certs/marweis-kb.crt`，有效期 10 年。
+Chrome 150+ 会拦截 HTTPS IP 地址。开发测试用 Firefox 或 `ssh -L 8080:127.0.0.1:8000 mx766@192.168.60.175` + `http://localhost:8080`。
 
-```
-┌──────────────────────────────────────────────────┐
-│  前端: Vue3 + TypeScript + Element Plus          │
-│  FastAPI 直接 serve dist/ 静态文件               │
-│  http://192.168.60.175:8000                      │
-└────────────────┬─────────────────────────────────┘
-                 │
-┌────────────────▼─────────────────────────────────┐
-│  后端: FastAPI (Python 3.10)                      │
-│  ┌──────────┬──────────┬──────────┬──────────┐  │
-│  │ 认证模块 │ 文档模块 │ 分类模块 │ 管理模块 │  │
-│  │ JWT+RBAC │ CRUD+上传│ 树形结构 │ 用户管理 │  │
-│  └──────────┴──────────┴──────────┴──────────┘  │
-└────┬─────────┬────────────┬──────────────────────┘
-     │         │            │
-┌────▼──┐ ┌───▼────┐ ┌─────▼──────┐
-│PostgreSQL│ │Meilisearch│ │   MinIO     │
-│ (元数据) │ │ (全文搜索)│ │ (文件存储)  │
-└──────────┘ └──────────┘ └─────┬──────┘
-                                │
-                         ┌──────▼──────┐
-                         │  Gotenberg   │
-                         │ (预览转PDF)  │
-                         └─────────────┘
-```
+## 技术栈
 
-### 目录结构
+- 后端：FastAPI (Python 3.10) + SQLAlchemy async + PostgreSQL
+- 前端：Vue 3 + TypeScript + Element Plus + Pinia + Vite
+- 存储：MinIO (S3 兼容) + Gotenberg (文档转 PDF)
+- 搜索：Meilisearch
+
+## 目录结构
 
 ```
 marweis-kb/
 ├── backend/
 │   ├── app/
-│   │   ├── api/          # API 路由 (auth, documents, categories, search, admin, personal)
-│   │   ├── models/       # SQLAlchemy 数据模型
-│   │   ├── schemas/      # Pydantic 请求/响应模式
-│   │   ├── services/     # 业务服务 (文件上传, 搜索)
-│   │   ├── middleware/   # 全局异常处理
-│   │   ├── auth.py       # JWT 认证 + RBAC 权限
-│   │   ├── config.py     # 配置 (环境变量)
-│   │   ├── database.py   # 数据库连接
-│   │   ├── main.py       # FastAPI 应用入口
-│   │   └── permissions.py # 文档/分类权限服务
-│   ├── alembic/          # 数据库迁移
-│   ├── scripts/          # 种子数据 & 导入脚本
-│   ├── .env              # 环境变量 (不提交到 git)
+│   │   ├── api/          # auth, documents, categories, search, personal, admin
+│   │   ├── models/       # User, Document, Category, Favorite, BrowseHistory
+│   │   ├── schemas/      # Pydantic 请求/响应模型
+│   │   ├── services/     # file_service (MinIO), search_service (Meilisearch)
+│   │   ├── middleware/    # error_handler, logging
+│   │   ├── auth.py       # JWT + bcrypt + 密码校验
+│   │   ├── config.py     # pydantic_settings, 环境变量
+│   │   ├── database.py   # async_session
+│   │   ├── main.py       # FastAPI 入口, CORS, 中间件, SPA fallback
+│   │   └── permissions.py # 部门/角色权限
+│   ├── scripts/          # seed.py, migrate_categories.py, cleanup_duplicates.py
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
 │   │   ├── views/        # 页面组件
-│   │   ├── components/   # 布局组件
-│   │   ├── api/client.ts # Axios HTTP 客户端
-│   │   ├── stores/auth.ts # Pinia 认证状态
-│   │   └── router/       # Vue Router 路由
-│   ├── dist/             # 构建产物
+│   │   ├── components/layout/  # AppHeader, MainLayout, WorkflowSidebar
+│   │   ├── api/client.ts       # Axios + TS 类型
+│   │   ├── stores/auth.ts      # Pinia 认证
+│   │   ├── styles/global.css   # CSS 变量 (主色 #c88a04 黄色)
+│   │   └── router/       # Vue Router
 │   └── package.json
-├── docker-compose.yml    # Docker 服务编排
-├── deploy.sh             # 一键部署脚本
-├── DEVLOG.md             # 开发日志
-├── seed_docs/            # 种子文档 (示例 + 知识库.zip)
-└── .gitignore
+├── docker-compose.yml
+├── nginx-marweis-kb.conf  # Nginx 配置
+└── deploy.sh
 ```
 
----
+## 当前功能状态
 
-## 日常运维
+### ✅ 已完成
 
-### 部署流程
+- 登录/注册 (JWT, bcrypt, 密码强度校验)
+- 文档 CRUD (上传/编辑/删除)
+- 文件上传 → MinIO + Gotenberg 自动转 PDF 预览
+- 在线预览 (后端 StreamingResponse 代理 PDF, 内联显示)
+- 下载 (MinIO presigned URL)
+- 全文搜索 (Meilisearch + SQL fallback)
+- RBAC 权限 (super_admin / dept_admin / editor / employee / guest)
+- 部门分类可见性控制
+- 管理后台 (用户管理/分类管理/文档管理)
+- 分类管理按部门标签页分组
+- 左侧工作流侧边栏 (器械注册部 7 模块)
+- Nginx HTTPS 反向代理
+- SPA fallback (刷新不 404)
+- 请求日志中间件
+- 登录限流
 
-```bash
-# 本地开发完成后:
-cd d:\workSpace\marweis-kb
-git add -A && git commit -m "描述修改内容"
-git push server master    # 推送到服务器
-git push origin master    # 推送到 GitHub (备份)
+### ❌ 待修复
 
-# 服务器上拉取并重启:
-ssh mx766@192.168.60.175
-cd ~/marweis-kb && git pull origin master
-fuser -k 8000/tcp          # 停止旧进程
-cd backend && nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > ~/logs/backend.log 2>&1 &
-```
+1. **预览功能**: 后端正常 (200, PDF stream), 前端 iframe 可能不显示, 需调试 DocumentView.vue 的 `fetchPreviewToken` 和 iframe src
+2. **侧边栏跳转**: 7 月 14 日最后修改了 CategoryView（递归查找 + 去掉了重复侧边栏）, 但未经充分测试
+3. **Chrome 150+ 拦截**: HTTPS IP 地址被 Chrome SmartScreen 拦截, 正式域名+正规证书后解决
+4. **GitHub 推送**: seed_docs/ 大文件 (621MB) 仍在 git 历史中, 需 filter-branch 清理后 force push
 
-### 或使用部署脚本
+### 待开发
 
-```bash
-# 本地执行 deploy.sh 一键推送 + 服务器拉取 + 重启
-bash deploy.sh
-```
+- 其他部门的工作流导航（当前仅器械注册部有）
+- 通讯录模块的卡片式展示
+- 批量文档导入功能
 
-### 服务器启动/重启
-
-```bash
-ssh mx766@192.168.60.175
-# 查看进程
-ps aux | grep uvicorn
-# 停止
-fuser -k 8000/tcp
-# 启动
-cd ~/marweis-kb/backend
-nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > ~/logs/backend.log 2>&1 &
-# 检查
-curl http://localhost:8000/api/health
-```
-
-### Docker 服务管理
-
-```bash
-# 启动所有服务
-cd ~/marweis-kb && docker compose up -d
-
-# 查看状态
-docker ps
-
-# 查看日志
-docker logs marweis-pg
-docker logs marweis-meili
-```
-
-### 前端重新构建
-
-```bash
-# 服务器上
-cd ~/marweis-kb/frontend
-npm install
-npx vite build --mode production
-# 重启后端即可 serve 新的 dist/
-```
-
----
-
-## 关键 API 端点
+## 核心 API
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/auth/login` | 登录获取 token |
-| GET | `/api/categories` | 获取分类树 |
-| GET | `/api/documents` | 文档列表 (支持分页/筛选/搜索) |
+| POST | `/api/auth/login` | 登录 |
+| POST | `/api/auth/register` | 注册 |
+| GET | `/api/auth/me` | 当前用户 |
+| GET | `/api/categories` | 分类树 (按部门过滤) |
+| POST/PUT/DELETE | `/api/categories[/{id}]` | 分类 CRUD |
+| GET | `/api/documents` | 文档列表 (分页/筛选) |
 | GET | `/api/documents/{id}` | 文档详情 |
-| POST | `/api/documents` | 上传文档 (multipart/form-data) |
-| PUT | `/api/documents/{id}` | 更新文档 |
-| DELETE | `/api/documents/{id}` | 软删除文档 |
-| GET | `/api/documents/{id}/download` | 下载文件 (307 → MinIO presigned URL) |
-| GET | `/api/documents/{id}/preview` | 在线预览 (Gotenberg 自动转 PDF) |
-| GET | `/api/search?q=关键词` | 全文搜索 |
+| POST | `/api/documents` | 上传文档 |
+| PUT/DELETE | `/api/documents/{id}` | 更新/软删除 |
+| GET | `/api/documents/{id}/preview` | PDF 流式预览 |
+| GET | `/api/documents/{id}/preview-token` | 限时预览 token |
+| GET | `/api/documents/{id}/download` | 下载 |
+| GET | `/api/search?q=` | 搜索 |
 | GET | `/api/admin/users` | 用户管理 |
+| GET/POST | `/api/me/favorites/{id}` | 收藏/取消 |
+| GET | `/api/me/stats` | 个人统计 |
 | GET | `/api/health` | 健康检查 |
 
----
-
-## 权限系统
-
-### 角色
-
-| 角色 | 权限 |
-|------|------|
-| super_admin | 全部权限 |
-| dept_admin | 管理本部门用户, 编辑本部门文档 |
-| editor | 上传/编辑自己的文档 |
-| employee | 浏览 + 下载 |
-| guest | 只读公开文档 |
-
-### 部门
-
-器械注册部、临床评价部、临床试验部、生产体系部、化妆品·医美部、特医食品部、管理层
-
----
-
-## 已导入的数据
-
-2,343 篇文档，按以下分类组织：
-
-- **审评报告** (1,305 篇 PDF) — 医疗器械 + 体外诊断试剂
-- **指导原则** (953 篇 docx) — 医疗器械注册审查 + IVD
-- **法规** (约 70 篇) — NMPA / FDA / CE MDR
-- **分类目录** (12 篇) — 器械分类界定
-- **其他** — 产品库、豁免目录等
-
-文件存储在 MinIO (`marweis-documents` bucket)，元数据在 PostgreSQL。
-
----
-
-## 批量导入新文件
-
-### 方式 1: 直写 MinIO + 数据库（最快，推荐大量文件）
+## 部署流程
 
 ```bash
-# 1. 先把文件传到服务器 /tmp/kb_import/ 目录
-#    保持目录结构，文件名即文档标题
+# 本地
+cd d:\workSpace\marweis-kb
+git add -A && git commit -m "描述"
+git push server master
 
-# 2. 运行导入脚本
+# 服务器 (SSH)
 ssh mx766@192.168.60.175
-python3 /tmp/fast_import.py
+cd ~/marweis-kb && git pull origin master
+
+# 前端改动需重建
+cd ~/marweis-kb/frontend && npx vite build --mode production
+
+# 后端改动需重启
+fuser -k 8000/tcp
+cd ~/marweis-kb/backend
+nohup python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > ~/logs/backend.log 2>&1 &
 ```
 
-### 方式 2: API 逐个上传（少量文件）
+## 数据库
+
+### 分类数据结构
+
+器械注册部工作流模块 (sort_order 1-7, visible_departments=["器械注册部"]):
 
 ```
-POST /api/documents  (multipart/form-data)
-参数: title, category_id, file, tags, summary
+1. 参考文件 → 通用法规（国内）, 通用法规（国外）, 指导原则, 审评论坛
+2. 分类目录
+3. 校验技术要求
+4. 临床评价资料 → 临床文献, 国家局网站, 说明书
+5. 发补 → 例卷, 发补意见
+6. 注册证书 → 注册证书, 注册资料
+7. 通讯录 → 中央药监局, 地方药监局
 ```
 
-### 方式 3: 前端 UI 上传
+批量导入的文档 (01_有源手术器械 等 3000+ 篇) 通过 `migrate_categories.py` 已迁移到对应模块下。
 
-访问 http://192.168.60.175:8000 → 管理后台 → 文档管理 → 上传
+### 迁移脚本
 
----
+- `scripts/migrate_categories.py` — 将旧分类移到新工作流模块
+- `scripts/cleanup_duplicates.py` — 隐藏重复的旧器械注册部顶级分类
+- `scripts/seed.py` — 初始化数据库 (仅首次部署用)
 
-## 已知问题 & 注意事项
+## 设计规范
 
-### 已修复的安全问题
-- JWT token 过期时间计算错误 → 已修复
-- Open Redirect 漏洞 → 已修复（域名白名单精确匹配）
-- XSS (v-html) → 已修复（HTML 转义）
-- 硬编码演示账号 → 已移除
-- 生产环境信息泄露 → 已修复
-
-### 待改进
-- 导入脚本中的凭据是硬编码的（仅内网使用，问题不大）
-- 前端分类树目前只显示两级，深层分类需点击切换
-- 搜索功能依赖 Meilisearch 正常运行
-- 还没有 HTTP → 所有流量走明文的 http，如需公网暴露建议加 Nginx + HTTPS
-
----
-
-## 故障排查
-
-| 问题 | 检查项 |
-|------|--------|
-| 网站打不开 | `ssh mx766@192.168.60.175` → `ps aux | grep uvicorn` |
-| 搜索无结果 | `docker ps | grep meili` (Meilisearch 是否运行) |
-| 下载失效 | `docker ps | grep minio` (MinIO 是否运行) |
-| 预览失败 | `docker ps | grep gotenberg` (Gotenberg 是否运行) |
-| Docker 未启动 | `docker compose up -d` (在 ~/marweis-kb 目录下) |
-| 磁盘满 | `df -h /` (当前 32G/98G — 见上方服务器信息) |
-| 内存不足 | `free -h` (8GB — 当前约 5GB 可用) |
-| 查看后端日志 | `tail -100 ~/logs/backend.log` |
-| 查看 API 错误 | `tail -100 ~/logs/backend.log | grep ERROR` |
-
----
-
-## 文档版本
-
-| 日期 | 说明 |
-|------|------|
-| 2026-07-10 | 项目初始化 |
-| 2026-07-13 | 代码审查修复 21 项 + 部署架构搭建 + 批量导入 2343 篇 + 下载/预览功能 |
+- 主色: `#c88a04` (金色)
+- 侧边栏: `#1e293b` 深色背景
+- 字体: Microsoft YaHei
+- CSS 变量在 `frontend/src/styles/global.css`
