@@ -26,6 +26,7 @@ const router = createRouter({
         { path: 'document/:id', name: 'Document', component: () => import('@/views/DocumentView.vue') },
         { path: 'search', name: 'Search', component: () => import('@/views/SearchView.vue') },
         { path: 'personal', name: 'Personal', component: () => import('@/views/PersonalView.vue') },
+        { path: 'contact/:id', name: 'Contact', component: () => import('@/views/ContactView.vue') },
       ],
     },
     {

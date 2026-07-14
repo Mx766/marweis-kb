@@ -73,7 +73,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, reactive } from 'vue'
-import { get } from '@/api/client'
+import { get, put } from '@/api/client'
 import { ElMessage } from 'element-plus'
 
 const activeTab = ref('general')
@@ -83,7 +83,7 @@ const config = reactive({
   site_name: '迈瑞生知识库',
   site_desc: '医疗器械注册 · 临床评价 · 临床试验 · 法规库',
   primary_color: '#1e50ae',
-  accent_color: '#fb8c00',
+  accent_color: '#ffc001',
   slogan: '专业法规知识管理平台',
   footer: '©2026 北京迈瑞生医药科技有限公司 版权所有 | 400-853-5405',
   max_upload_mb: 500,
@@ -95,8 +95,33 @@ const config = reactive({
 const stats = reactive({ total_docs: '-', total_users: '-', total_cats: '-' })
 const fileTypes = ['pdf','doc','docx','xls','xlsx','ppt','pptx','txt','md','csv','jpg','jpeg','png','gif','tiff','bmp','mp4','avi','mov','mp3','wav','zip','rar','7z','dwg','epub','mobi']
 
-function saveGeneral() { ElMessage.success('设置已保存（需重启生效）') }
-function saveStorage() { ElMessage.success('存储设置已保存') }
+async function saveGeneral() {
+  try {
+    await put('/api/admin/settings', {
+      site_name: config.site_name,
+      site_desc: config.site_desc,
+      primary_color: config.primary_color,
+      accent_color: config.accent_color,
+      slogan: config.slogan,
+      footer: config.footer,
+    })
+    ElMessage.success('设置已保存')
+    // Apply new primary color immediately
+    document.documentElement.style.setProperty('--color-primary', config.primary_color)
+  } catch { ElMessage.error('保存失败，需要超级管理员权限') }
+}
+
+async function saveStorage() {
+  try {
+    await put('/api/admin/settings', {
+      max_upload_mb: String(config.max_upload_mb),
+      minio_endpoint: config.minio_endpoint,
+      minio_bucket: config.minio_bucket,
+      allowed_exts: config.allowed_exts.join(','),
+    })
+    ElMessage.success('存储设置已保存（需重启后端生效）')
+  } catch { ElMessage.error('保存失败') }
+}
 
 async function rebuildIndex() {
   rebuilding.value = true
@@ -107,9 +132,20 @@ async function rebuildIndex() {
 
 onMounted(async () => {
   try {
-    const resp: any = await get('/api/me/stats')
-    // Stats from backend are currently user-specific, in admin mode we'd want site-wide
-  } catch {}
+    const resp: any = await get('/api/admin/settings')
+    if (resp && Object.keys(resp).length > 0) {
+      if (resp.site_name) config.site_name = resp.site_name
+      if (resp.site_desc) config.site_desc = resp.site_desc
+      if (resp.primary_color) config.primary_color = resp.primary_color
+      if (resp.accent_color) config.accent_color = resp.accent_color
+      if (resp.slogan) config.slogan = resp.slogan
+      if (resp.footer) config.footer = resp.footer
+      if (resp.max_upload_mb) config.max_upload_mb = Number(resp.max_upload_mb)
+    }
+    // Also load stats
+    const health: any = await get('/api/health')
+    if (health) Object.assign(stats, { total_docs: '-', total_users: '-', total_cats: '-', version: health.version })
+  } catch { /* non-admin users get 403, show defaults */ }
 })
 </script>
 

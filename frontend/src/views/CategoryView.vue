@@ -64,12 +64,13 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Document } from '@element-plus/icons-vue'
 import { get } from '@/api/client'
 import dayjs from 'dayjs'
 
 const route = useRoute()
+const router = useRouter()
 
 interface Cat { id: string; name: string; children?: Cat[] }
 const currentCat = ref<Cat | null>(null)
@@ -135,7 +136,13 @@ async function doLoad() {
 
 async function loadCategory(id: string) {
   const tree: Cat[] = await get('/api/categories')
-  currentCat.value = findByCat(tree, id) || null
+  const cat = findByCat(tree, id)
+  // Detect contact categories → switch to card view
+  if (cat?.name?.includes('通讯录')) {
+    router.replace({ name: 'Contact', params: { id } })
+    return
+  }
+  currentCat.value = cat
   activeSubId.value = ''
   page.value = 1
   doLoad()

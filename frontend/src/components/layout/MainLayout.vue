@@ -1,8 +1,8 @@
 <template>
-  <div class="main-layout" :class="{ 'has-sidebar': showSidebar }">
+  <div class="main-layout">
     <AppHeader />
     <WorkflowSidebar v-if="showSidebar" />
-    <main class="main-content" :class="{ 'with-sidebar': showSidebar }">
+    <main class="main-content" :class="{ 'with-nav': showSidebar }">
       <div class="content-wrapper">
         <router-view />
       </div>
@@ -22,9 +22,9 @@ import { onMounted } from 'vue'
 const auth = useAuthStore()
 onMounted(() => auth.fetchMe())
 
-const WORKFLOW_DEPTS = ['器械注册部']
+const WORKFLOW_DEPTS = ['器械注册部', '临床评价部', '临床试验部', '生产体系部', '化妆品·医美部', '特医食品部', '管理层']
 const showSidebar = computed(() => {
-  if (auth.isAdmin) return true  // super_admin / dept_admin see sidebar
+  if (auth.isAdmin) return true
   const dept = auth.user?.department
   return dept ? WORKFLOW_DEPTS.includes(dept) : false
 })
@@ -40,8 +40,8 @@ const showSidebar = computed(() => {
   flex: 1;
   padding-top: 60px;
 }
-.main-content.with-sidebar {
-  margin-left: 220px;
+.main-content.with-nav {
+  padding-top: 108px; /* 60px header + 48px navbar */
 }
 .content-wrapper {
   max-width: 1300px;

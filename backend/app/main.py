@@ -5,9 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
-from app.api import auth, categories, documents, search, personal, admin
+from app.api import auth, categories, documents, search, personal, admin, system
 from app.middleware.error_handler import global_exception_handler
 from app.middleware.logging import request_logging_middleware
+from app.services.search_service import _get_search_client_sync
 
 # Configure logging
 logging.basicConfig(
@@ -44,11 +45,25 @@ app.include_router(documents.router, prefix="/api/documents", tags=["文档"])
 app.include_router(search.router, prefix="/api/search", tags=["搜索"])
 app.include_router(personal.router, prefix="/api/me", tags=["个人中心"])
 app.include_router(admin.router, prefix="/api/admin", tags=["管理后台"])
+app.include_router(system.router, prefix="/api/admin", tags=["系统设置"])
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "app": settings.APP_NAME, "version": settings.APP_VERSION}
+    meili_status = "unknown"
+    try:
+        client = _get_search_client_sync()
+        h = client.health()
+        meili_status = h.get("status", "unknown")
+    except Exception:
+        meili_status = "unreachable"
+
+    return {
+        "status": "ok" if meili_status != "unreachable" else "degraded",
+        "app": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "meilisearch": meili_status,
+    }
 
 
 # ── Serve the Vue SPA frontend ─────────────────────
