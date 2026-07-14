@@ -46,23 +46,19 @@ async def list_categories(
         return _build_tree(result.scalars().all())
 
     if current_user.role == "super_admin":
-        # Admin: show all categories
         result = await db.execute(select(Category).order_by(Category.sort_order))
         return _build_tree(result.scalars().all())
 
-    # Non-admin user: public + department-specific + wildcard (SQL-level filter)
-    result = await db.execute(
-        select(Category)
-        .where(
-            or_(
-                Category.visible_departments.is_(None),
-                Category.visible_departments.contains([current_user.department]),
-                Category.visible_departments.contains(["*"]),
-            )
-        )
-        .order_by(Category.sort_order)
-    )
-    return _build_tree(result.scalars().all())
+    # Non-admin: load all, filter in Python (only ~40 rows, fine for this scale)
+    result = await db.execute(select(Category).order_by(Category.sort_order))
+    all_cats = result.scalars().all()
+    visible = [
+        c for c in all_cats
+        if c.visible_departments is None
+        or current_user.department in (c.visible_departments or [])
+        or "*" in (c.visible_departments or [])
+    ]
+    return _build_tree(visible)
 
 
 @router.post("")

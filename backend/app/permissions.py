@@ -29,17 +29,15 @@ class PermissionService:
             result = await self.db.execute(select(Category.id))
             return [row[0] for row in result.all()]
 
-        # Non-admin logged-in user: public + department-specific + wildcard
-        result = await self.db.execute(
-            select(Category.id).where(
-                or_(
-                    Category.visible_departments.is_(None),
-                    Category.visible_departments.contains([self.user.department]),
-                    Category.visible_departments.contains(["*"]),
-                )
-            )
-        )
-        return [row[0] for row in result.all()]
+        # Load all categories, filter in Python (small table, avoids JSON operator issues)
+        result = await self.db.execute(select(Category))
+        all_cats = result.scalars().all()
+        return [
+            c.id for c in all_cats
+            if c.visible_departments is None
+            or self.user.department in (c.visible_departments or [])
+            or "*" in (c.visible_departments or [])
+        ]
 
     async def can_view_document(self, doc: Document) -> bool:
         if self.user is None:
