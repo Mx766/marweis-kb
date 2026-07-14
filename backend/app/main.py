@@ -27,6 +27,14 @@ app.add_middleware(
 )
 
 app.middleware("http")(request_logging_middleware)
+
+# ── Chrome 142+ Local Network Access fix ──────────────────
+@app.middleware("http")
+async def add_private_network_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
 app.add_exception_handler(Exception, global_exception_handler)
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
