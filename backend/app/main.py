@@ -21,32 +21,20 @@ app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.middleware("http")(request_logging_middleware)
 
-# ── Chrome 142+ Local Network Access fix ──────────────────
-# Only enable this header for local/dev access to avoid weakening security
-_ALLOWED_PRIVATE_ORIGINS = {
-    "http://localhost:8080",
-    "http://localhost:8443",
-    "https://localhost:8443",
-    "http://127.0.0.1:8080",
-    f"http://{settings.MINIO_PUBLIC_ENDPOINT}" if settings.MINIO_PUBLIC_ENDPOINT else "",
-    f"https://{settings.MINIO_PUBLIC_ENDPOINT}" if settings.MINIO_PUBLIC_ENDPOINT else "",
-}
-_ALLOWED_PRIVATE_ORIGINS.discard("")  # Remove empty strings
-
-@app.middleware("http")
-async def add_private_network_header(request: Request, call_next):
-    response = await call_next(request)
-    origin = request.headers.get("Origin")
-    if origin and origin in _ALLOWED_PRIVATE_ORIGINS:
+# ── Chrome 142+ Local Network Access fix (dev only) ─────
+if settings.ENVIRONMENT == "development":
+    @app.middleware("http")
+    async def add_private_network_header(request: Request, call_next):
+        response = await call_next(request)
         response.headers["Access-Control-Allow-Private-Network"] = "true"
-    return response
+        return response
 
 app.add_exception_handler(Exception, global_exception_handler)
 

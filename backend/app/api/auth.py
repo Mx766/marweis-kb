@@ -1,5 +1,7 @@
+import time
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import create_token, verify_password, hash_password, validate_password_strength, get_current_user
@@ -17,8 +19,11 @@ _LOGIN_RATE_WINDOW = 300    # seconds (5 minutes)
 
 def _check_login_rate_limit(client_ip: str) -> None:
     """Raise 429 if the client has exceeded the login rate limit."""
-    import time
     now = time.time()
+    # Clean up expired entries periodically
+    expired = [ip for ip, (_, ws) in _login_attempts.items() if now - ws > _LOGIN_RATE_WINDOW]
+    for ip in expired:
+        del _login_attempts[ip]
     count, window_start = _login_attempts.get(client_ip, (0, now))
     if now - window_start > _LOGIN_RATE_WINDOW:
         count, window_start = 0, now
@@ -29,10 +34,8 @@ def _check_login_rate_limit(client_ip: str) -> None:
 
 @router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    import time
     client_ip = request.client.host if request.client else "unknown"
     _check_login_rate_limit(client_ip)
-    from sqlalchemy import select
     result = await db.execute(select(User).where(User.username == body.username))
     user = result.scalar_one_or_none()
     if not user or not verify_password(body.password, user.password_hash):
@@ -53,8 +56,6 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
 @router.post("/register")
 async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Self-registration — creates a new user with 'employee' role."""
-    from sqlalchemy import select
-
     # Validate username uniqueness
     existing = (await db.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
     if existing:

@@ -20,19 +20,22 @@
       </div>
     </div>
 
-    <!-- Category Grid -->
+    <!-- Workflow Module Cards -->
     <div class="section">
       <h2 class="section-title">知识库导航</h2>
       <div class="category-grid">
         <div
-          v-for="cat in categoryTree"
+          v-for="(cat, idx) in categoryTree"
           :key="cat.id"
           class="category-card"
           @click="$router.push(`/category/${cat.id}`)"
         >
-          <el-icon :size="32" :color="getIconColor(cat.name)"><Folder /></el-icon>
+          <div class="card-icon" :style="{ background: getIconBg(cat.name, idx) }">
+            <el-icon :size="28" color="#fff"><Folder /></el-icon>
+          </div>
           <h3>{{ cat.name }}</h3>
           <p v-if="cat.children?.length">{{ cat.children.length }} 个子分类</p>
+          <p v-else>浏览文档</p>
         </div>
       </div>
     </div>
@@ -79,11 +82,8 @@ const categoryTree = ref<any[]>([])
 const recentDocs = ref<any[]>([])
 
 const colors = ['#1e50ae','#e74c3c','#27ae60','#e67e22','#9b59b6','#3498db','#1abc9c','#e91e63']
-function getIconColor(name: string) {
-  // Hash the category name to get a consistent color
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
-  return colors[Math.abs(hash) % colors.length]
+function getIconBg(name: string, idx: number) {
+  return colors[idx % colors.length]
 }
 
 function formatDate(d: string) { return dayjs(d).format('YYYY-MM-DD') }
@@ -133,8 +133,16 @@ onMounted(async () => {
   transition: all .2s;
 }
 .category-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
-.category-card h3 { font-size: 14px; margin: 8px 0 4px; }
-.category-card p { font-size: 12px; color: var(--color-text-secondary); }
+.card-icon {
+  width: 56px; height: 56px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto var(--spacing-md);
+}
+.category-card h3 { font-size: 14px; margin: 0 0 4px; }
+.category-card p { font-size: 12px; color: var(--color-text-secondary); margin: 0; }
 
 .doc-grid { display: flex; flex-direction: column; gap: var(--spacing-sm); }
 .doc-card {

@@ -194,6 +194,9 @@ async def create_document(
     tag_list = json.loads(tags) if isinstance(tags, str) else (tags or [])
 
     if file:
+        # Enforce upload size limit
+        if file.size and file.size > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+            raise HTTPException(status_code=413, detail=f"文件大小超过限制 ({settings.MAX_UPLOAD_SIZE_MB}MB)")
         content = await file.read()
         result = await FileService.upload_and_convert(content, file.filename or "unknown", file.content_type or "")
 
@@ -352,11 +355,7 @@ async def preview_document(
 ):
     """Stream a PDF preview directly to the browser (proxied from MinIO).
 
-    Accepts token via query parameter because browser iframe requests
-    don't carry the Authorization header.
     """
-    from fastapi.responses import StreamingResponse
-
     # Authenticate via preview token (scoped, short-lived) or full JWT
     if token:
         try:
@@ -381,6 +380,9 @@ async def preview_document(
     perm = PermissionService(db, current_user)
     if not await perm.can_view_document(doc):
         raise HTTPException(status_code=403, detail="无权查看该文档")
+
+    doc.view_count += 1
+    await db.commit()
 
     # Link-type documents → redirect to external URL
     if doc.file_type == "link":

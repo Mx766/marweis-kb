@@ -27,6 +27,7 @@ async def search(
     current_user: User | None = Depends(get_current_user_optional),
 ):
     # Get visible category IDs for permission filtering
+    # None = super_admin (no filter); list = visible IDs (may be empty)
     allowed_cat_ids: list[str] | None = None
     if current_user is None:
         cats = await db.execute(select(Category))
@@ -36,42 +37,36 @@ async def search(
         visible = await perm.get_visible_category_ids()
         allowed_cat_ids = [str(v) for v in visible]
 
+    # If the user has NO visible categories, return empty immediately
+    if allowed_cat_ids is not None and len(allowed_cat_ids) == 0:
+        return SearchResult(items=[], total=0, query=q, page=page, size=size)
+
     # Try Meilisearch first, fall back to SQL LIKE
     result = await search_documents(
-        query=q,
-        page=page,
-        size=size,
-        category_id=category_id,
-        file_type=file_type,
+        query=q, page=page, size=size,
+        category_id=category_id, file_type=file_type,
         allowed_category_ids=allowed_cat_ids,
     )
 
+    # Post-filter helper: apply can_view_document to enforce full permission model
+    async def _filter_results(docs):
+        perm_svc = PermissionService(db, current_user)
+        filtered = []
+        for d in docs:
+            if await perm_svc.can_view_document(d):
+                filtered.append(d)
+        return filtered
+
     if result["hits"]:
-        # Batch-load all documents by IDs in a single query (eliminates N+1)
         doc_ids = [_uuid.UUID(hit["id"]) for hit in result["hits"]]
         docs_result = await db.execute(
             select(Document).where(Document.id.in_(doc_ids), Document.is_deleted == False)
         )
-        doc_map = {doc.id: doc for doc in docs_result.scalars().all()}
-
-        # Batch-load uploaders
-        docs_list = list(doc_map.values())
-        uploader_map = await _batch_load_uploaders(db, docs_list)
-
-        # Preserve Meilisearch result order
-        items = []
-        for doc_id in doc_ids:
-            doc = doc_map.get(doc_id)
-            if doc:
-                items.append(_doc_to_item(doc, uploader_map.get(doc.uploader_id)))
-
-        return SearchResult(
-            items=items,
-            total=result["total"],
-            query=q,
-            page=page,
-            size=size,
-        )
+        docs = [_d for _d in docs_result.scalars().all()]
+        docs = await _filter_results(docs)
+        uploader_map = await _batch_load_uploaders(db, docs)
+        items = [_doc_to_item(d, uploader_map.get(d.uploader_id)) for d in docs]
+        return SearchResult(items=items, total=result["total"], query=q, page=page, size=size)
 
     # Fallback: SQL LIKE search
     conditions = [Document.is_deleted == False]
@@ -84,27 +79,16 @@ async def search(
     if file_type:
         conditions.append(Document.file_type == file_type)
     if tag:
-        conditions.append(
-            cast(Document.tags, String).ilike(f"%{tag}%")
-        )
-    if allowed_cat_ids:
+        conditions.append(cast(Document.tags, String).ilike(f"%{tag}%"))
+    if allowed_cat_ids is not None:
         conditions.append(Document.category_id.in_([_uuid.UUID(c) for c in allowed_cat_ids]))
 
     query_obj = select(Document).where(*conditions).order_by(Document.updated_at.desc())
     count_query = select(func.count(Document.id)).where(*conditions)
-
     total = (await db.execute(count_query)).scalar()
     result_docs = await db.execute(query_obj.offset((page - 1) * size).limit(size))
     docs = result_docs.scalars().all()
-
-    # Batch-load uploaders (eliminates N+1)
+    docs = await _filter_results(docs)
     uploader_map = await _batch_load_uploaders(db, docs)
-    items = [_doc_to_item(doc, uploader_map.get(doc.uploader_id)) for doc in docs]
-
-    return SearchResult(
-        items=items,
-        total=total,
-        query=q,
-        page=page,
-        size=size,
-    )
+    items = [_doc_to_item(d, uploader_map.get(d.uploader_id)) for d in docs]
+    return SearchResult(items=items, total=total, query=q, page=page, size=size)

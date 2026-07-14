@@ -93,6 +93,17 @@ async def update_category(
     if not cat:
         raise HTTPException(status_code=404, detail="分类不存在")
     update_data = body.model_dump(exclude_unset=True)
+
+    # Prevent cycles: new parent_id must not be a descendant of this category
+    new_parent_id = update_data.get("parent_id")
+    if new_parent_id and _uuid.UUID(new_parent_id) != _uuid.UUID(category_id):
+        # Walk up from the proposed parent to check it doesn't descend from cat
+        current = await db.get(Category, _uuid.UUID(new_parent_id))
+        while current and current.parent_id:
+            if current.parent_id == cat.id:
+                raise HTTPException(status_code=400, detail="不能将分类移动到其子分类下（会造成循环）")
+            current = await db.get(Category, current.parent_id)
+
     for key, val in update_data.items():
         setattr(cat, key, val)
     await db.flush()

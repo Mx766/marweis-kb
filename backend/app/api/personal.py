@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -8,6 +8,7 @@ from app.models.document import Document
 from app.models.favorite import Favorite, BrowseHistory
 from app.schemas import DocumentItem, PersonalStats, DocumentListResponse
 from app.api.documents import _doc_to_item, _batch_load_uploaders
+from app.permissions import PermissionService
 import uuid as _uuid
 
 router = APIRouter()
@@ -82,6 +83,14 @@ async def add_favorite(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Verify document exists and user can view it
+    doc = await db.get(Document, _uuid.UUID(document_id))
+    if not doc or doc.is_deleted:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    perm = PermissionService(db, current_user)
+    if not await perm.can_view_document(doc):
+        raise HTTPException(status_code=403, detail="无权访问该文档")
+
     existing = (
         await db.execute(
             select(Favorite).where(
