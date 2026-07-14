@@ -2,10 +2,10 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.auth import create_token, verify_password, get_current_user
-from app.config import settings
+from app.auth import create_token, verify_password, hash_password, validate_password_strength, get_current_user
+from app.config import settings, DEPARTMENTS
 from app.models.user import User
-from app.schemas import LoginRequest, LoginResponse, UserProfile
+from app.schemas import LoginRequest, LoginResponse, RegisterRequest, UserProfile
 
 router = APIRouter()
 
@@ -48,6 +48,39 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
         user=UserProfile.from_orm(user),
         expires_at=str(int(actual_expire_at.timestamp())),
     )
+
+
+@router.post("/register")
+async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    """Self-registration — creates a new user with 'employee' role."""
+    from sqlalchemy import select
+
+    # Validate username uniqueness
+    existing = (await db.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="用户名已存在")
+
+    # Validate department
+    if body.department not in DEPARTMENTS:
+        raise HTTPException(status_code=400, detail=f"无效的部门: {body.department}")
+
+    # Validate password strength
+    pw_error = validate_password_strength(body.password)
+    if pw_error:
+        raise HTTPException(status_code=400, detail=pw_error)
+
+    user = User(
+        username=body.username,
+        password_hash=hash_password(body.password),
+        display_name=body.display_name,
+        department=body.department,
+        role="employee",
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    await db.commit()
+    return {"message": "注册成功", "username": user.username}
 
 
 @router.get("/me", response_model=UserProfile)

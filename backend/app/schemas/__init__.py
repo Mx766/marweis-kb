@@ -10,6 +10,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    username: str
+    display_name: str
+    department: str
+    password: str
+
+
 class LoginResponse(BaseModel):
     token: str
     user: "UserProfile"

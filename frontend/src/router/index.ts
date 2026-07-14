@@ -11,14 +11,21 @@ const router = createRouter({
       meta: { guest: true },
     },
     {
+      path: '/register',
+      name: 'Register',
+      component: () => import('@/views/RegisterView.vue'),
+      meta: { guest: true },
+    },
+    {
       path: '/',
       component: () => import('@/components/layout/MainLayout.vue'),
+      meta: { requiresAuth: true },
       children: [
         { path: '', name: 'Home', component: () => import('@/views/HomeView.vue') },
         { path: 'category/:id?', name: 'Category', component: () => import('@/views/CategoryView.vue') },
         { path: 'document/:id', name: 'Document', component: () => import('@/views/DocumentView.vue') },
         { path: 'search', name: 'Search', component: () => import('@/views/SearchView.vue') },
-        { path: 'personal', name: 'Personal', component: () => import('@/views/PersonalView.vue'), meta: { requiresAuth: true } },
+        { path: 'personal', name: 'Personal', component: () => import('@/views/PersonalView.vue') },
       ],
     },
     {

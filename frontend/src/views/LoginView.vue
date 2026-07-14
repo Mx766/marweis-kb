@@ -18,7 +18,7 @@
         </el-button>
       </el-form>
       <div class="login-hint">
-        <p>如需账号请联系系统管理员</p>
+        <p>没有账号？<router-link to="/register">立即注册</router-link></p>
       </div>
     </div>
   </div>
