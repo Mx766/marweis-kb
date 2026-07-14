@@ -17,7 +17,6 @@
         @select="handleMenuSelect"
       >
         <el-menu-item index="/">首页</el-menu-item>
-        <el-menu-item index="/category">知识库</el-menu-item>
         <el-menu-item v-if="auth.isAdmin" index="/admin">管理后台</el-menu-item>
       </el-menu>
 
