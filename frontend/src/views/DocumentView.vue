@@ -30,7 +30,7 @@
                 <el-button size="large" @click="copyLink">复制链接</el-button>
               </div>
               <div class="link-embed" v-if="isEmbeddable(doc.source_url)">
-                <iframe :src="doc.source_url" frameborder="0" sandbox="allow-same-origin allow-scripts"></iframe>
+                <iframe :src="doc.source_url" frameborder="0" sandbox="allow-scripts allow-popups" referrerpolicy="no-referrer"></iframe>
               </div>
             </div>
           </template>
@@ -64,14 +64,27 @@
           <!-- Document placeholder with rich info — now with inline preview -->
           <template v-else>
             <div class="preview-placeholder">
-              <!-- Loading state -->
-              <div v-if="previewLoading" class="preview-loading">
-                <el-icon class="is-loading" :size="36"><Loading /></el-icon>
-                <p>正在加载预览...</p>
-                <p class="hint">文档较大时首次转换可能需要 10-30 秒</p>
+              <!-- Unsupported format -->
+              <div v-if="!isPreviewSupported && !previewUrl && !previewLoading" class="preview-unsupported">
+                <el-result icon="info" :title="'此文件格式不支持在线预览'" :sub-title="'.' + (doc.file_ext?.toUpperCase() || '') + ' 格式'">
+                  <template #extra>
+                    <el-button type="primary" @click="doDownload">下载原件查看</el-button>
+                  </template>
+                </el-result>
               </div>
-              <!-- Timeout -->
-              <div v-else-if="previewTimeout" class="preview-error">
+
+              <!-- Error: no preview available (not a format issue, just can't get preview) -->
+              <div v-else-if="!previewUrl && !previewLoading && !previewTimeout" class="preview-error">
+                <el-result icon="warning" title="预览不可用"
+                  sub-title="无法获取预览，请尝试下载查看">
+                  <template #extra>
+                    <el-button type="primary" @click="doDownload">下载原件</el-button>
+                  </template>
+                </el-result>
+              </div>
+
+              <!-- Timeout with no URL yet (API call timed out) -->
+              <div v-else-if="previewTimeout && !previewUrl" class="preview-error">
                 <el-result icon="warning" title="预览加载超时"
                   sub-title="请刷新页面重试，或直接下载查看">
                   <template #extra>
@@ -80,47 +93,20 @@
                   </template>
                 </el-result>
               </div>
-              <!-- Unsupported preview -->
-              <div v-else-if="!isPreviewSupported && !previewUrl" class="preview-unsupported">
-                <el-result icon="info" :title="'此文件格式不支持在线预览'" :sub-title="'.' + (doc.file_ext?.toUpperCase() || '') + ' 格式'">
-                  <template #extra>
-                    <el-button type="primary" @click="doDownload">下载原件查看</el-button>
-                  </template>
-                </el-result>
-                <div class="preview-page">
-                  <div class="file-type-badge">
-                    <el-tag :color="fileIconColor(doc.file_ext)" effect="dark" size="large">
-                      {{ doc.file_ext?.toUpperCase() }}
-                    </el-tag>
-                  </div>
-                  <h2>{{ doc.title }}</h2>
-                  <div v-if="doc.summary" class="preview-summary">{{ doc.summary }}</div>
-                  <div class="preview-meta-grid">
-                    <div class="meta-item">
-                      <span class="meta-label">文件大小</span>
-                      <span class="meta-value">{{ formatSize(doc.file_size) }}</span>
-                    </div>
-                    <div v-if="doc.uploader_name" class="meta-item">
-                      <span class="meta-label">上传者</span>
-                      <span class="meta-value">{{ doc.uploader_name }}</span>
-                    </div>
-                  </div>
-                  <div v-if="doc.tags?.length" class="preview-tags">
-                    <el-tag v-for="t in doc.tags" :key="t" size="small">{{ t }}</el-tag>
-                  </div>
+
+              <!-- Waiting for preview-token API (no URL yet) -->
+              <div v-else-if="previewLoading && !previewUrl" class="preview-loading">
+                <el-icon class="is-loading" :size="36"><Loading /></el-icon>
+                <p>正在获取预览令牌...</p>
+              </div>
+
+              <!-- === Iframe always rendered when previewUrl is set (MUST be in DOM for @load to fire) === -->
+              <div v-if="previewUrl" class="inline-preview">
+                <div v-if="previewLoading" class="preview-loading-overlay">
+                  <el-icon class="is-loading" :size="36"><Loading /></el-icon>
+                  <p>正在加载预览...</p>
+                  <p class="hint">文档较大时首次转换可能需要 10-30 秒</p>
                 </div>
-              </div>
-              <!-- Error: no preview URL -->
-              <div v-else-if="!previewUrl" class="preview-error">
-                <el-result icon="warning" title="预览不可用"
-                  sub-title="无法获取预览，请尝试下载查看">
-                  <template #extra>
-                    <el-button type="primary" @click="doDownload">下载原件</el-button>
-                  </template>
-                </el-result>
-              </div>
-              <!-- PDF Preview iframe -->
-              <div v-else class="inline-preview">
                 <iframe
                   :src="previewUrl"
                   width="100%"
@@ -128,11 +114,12 @@
                   style="border:none;border-radius:8px"
                   title="文档预览"
                   sandbox="allow-scripts allow-same-origin"
-                  referrerpolicy="no-referrer"
                   @load="onPreviewLoaded"
                 ></iframe>
               </div>
-              <div class="preview-page" :class="{ 'has-preview': previewUrl }">
+
+              <!-- Document metadata — shown when preview is ready or format unsupported -->
+              <div v-if="previewUrl || (!isPreviewSupported && !previewUrl && !previewLoading && !previewTimeout)" class="preview-page" :class="{ 'has-preview': !!previewUrl }">
                 <div class="file-type-badge">
                   <el-tag :color="fileIconColor(doc.file_ext)" effect="dark" size="large">
                     {{ doc.file_ext?.toUpperCase() }}
@@ -245,7 +232,12 @@ const previewTimeout = ref(false)
 let _previewTimer: ReturnType<typeof setTimeout> | null = null
 
 async function fetchPreviewToken(docId: string) {
-  if (!auth.isLoggedIn) return
+  if (!auth.isLoggedIn) {
+    // Guest users can't get a preview token
+    previewUrl.value = ''
+    previewLoading.value = false
+    return
+  }
   previewLoading.value = true
   previewTimeout.value = false
   try {
@@ -258,17 +250,19 @@ async function fetchPreviewToken(docId: string) {
       previewUrl.value = `/api/documents/${docId}/preview?token=${encodeURIComponent(auth.token)}`
     } else {
       previewUrl.value = ''
+      previewLoading.value = false
+      return // no fallback, no timeout needed
     }
   }
 
-  // Timeout: 15 seconds for PDF preview
+  // Timeout: 45 seconds for PDF preview / on-demand conversion
   if (_previewTimer) clearTimeout(_previewTimer)
   _previewTimer = setTimeout(() => {
     if (previewLoading.value) {
       previewTimeout.value = true
       previewLoading.value = false
     }
-  }, 15000)
+  }, 45000)
 }
 
 function onPreviewLoaded() {
@@ -299,10 +293,16 @@ function copyLink() {
   ElMessage.success('链接已复制')
 }
 
-function doDownload() {
+async function doDownload() {
   if (!doc.value) return
-  // Use direct navigation — the backend returns a 307 redirect to the presigned URL
-  window.location.href = `/api/documents/${doc.value.id}/download`
+  try {
+    // Fetch a short-lived, scoped download token (avoids exposing full JWT in URL)
+    const resp: any = await get(`/api/documents/${doc.value.id}/download-token`)
+    window.location.href = `/api/documents/${doc.value.id}/download?token=${encodeURIComponent(resp.token)}`
+  } catch {
+    // Fallback for guest users: try without token
+    window.location.href = `/api/documents/${doc.value.id}/download`
+  }
 }
 
 async function toggleFavorite() {
@@ -385,6 +385,16 @@ onMounted(loadDoc)
 .preview-loading { text-align: center; padding: var(--spacing-2xl); color: var(--color-text-secondary); }
 .preview-loading p { margin-top: var(--spacing-md); font-size: 14px; }
 .preview-loading .hint { font-size: 12px; color: var(--color-text-secondary); }
+
+.inline-preview { position: relative; min-height: 400px; }
+.preview-loading-overlay {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.85); border-radius: 8px;
+  color: var(--color-text-secondary);
+}
+.preview-loading-overlay p { margin-top: var(--spacing-md); font-size: 14px; }
+.preview-loading-overlay .hint { font-size: 12px; }
 .preview-error { padding: var(--spacing-lg); }
 .preview-unsupported { padding: var(--spacing-lg); }
 .preview-page { max-width: 800px; margin: 0 auto; min-height: 300px; border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--spacing-xl); }
@@ -398,7 +408,22 @@ onMounted(loadDoc)
 .meta-value { font-size: 14px; color: var(--color-text-primary); margin-top: 2px; }
 .preview-tags { display: flex; gap: 4px; flex-wrap: wrap; }
 
-.doc-toolbar { display: flex; gap: var(--spacing-sm); padding: var(--spacing-md) var(--spacing-lg); border-top: 1px solid var(--color-border); background: var(--color-bg-secondary); }
+.doc-toolbar {
+  display: flex;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-top: 1px solid var(--color-border);
+  background: #fafbfc;
+}
+.doc-toolbar .el-button--default {
+  border-color: #d0d5dd;
+  font-weight: 500;
+}
+.doc-toolbar .el-button--default:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: #f8faff;
+}
 .doc-meta { padding: var(--spacing-lg); }
 
 @media (max-width: 900px) {

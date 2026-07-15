@@ -39,8 +39,10 @@
           v-model:current-page="page"
           :page-size="size"
           :total="total"
-          layout="prev, pager, next"
+          layout="total, sizes, prev, pager, next, jumper"
+          :page-sizes="[10,20,50]"
           @current-change="doSearch"
+          @size-change="(s: number) => { size = s; doSearch(); }"
         />
       </div>
     </div>

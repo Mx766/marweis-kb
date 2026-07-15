@@ -122,9 +122,11 @@
           v-model:current-page="page"
           :page-size="size"
           :total="total"
-          layout="prev, pager, next"
+          layout="total, sizes, prev, pager, next, jumper"
+          :page-sizes="[10,20,50]"
           background
           @current-change="doLoad"
+          @size-change="(s: number) => { size = s; doLoad(); }"
         />
       </div>
     </div>
@@ -158,15 +160,15 @@ const subCategories = computed(() => currentCat.value?.children || [])
 function formatDate(d: string) { return dayjs(d).format('YYYY-MM-DD') }
 
 const iconBgMap: Record<string, string> = {
-  pdf: '#fef0f0', doc: '#eef4fd', docx: '#eef4fd',
-  xls: '#edf7ee', xlsx: '#edf7ee', ppt: '#fef6ee', pptx: '#fef6ee',
-  link: '#e6f7f9', txt: '#f5f5f5', md: '#f5f5f5',
-  jpg: '#fdf2f8', jpeg: '#fdf2f8', png: '#fdf2f8',
-  zip: '#f5f0e8', rar: '#f5f0e8',
-  mp4: '#ede7f6', avi: '#ede7f6',
+  pdf: '#ef4444', doc: '#3b82f6', docx: '#3b82f6',
+  xls: '#16a34a', xlsx: '#16a34a', ppt: '#f97316', pptx: '#f97316',
+  link: '#0891b2', txt: '#6b7280', md: '#6b7280',
+  jpg: '#a855f7', jpeg: '#a855f7', png: '#a855f7',
+  zip: '#78716c', rar: '#78716c',
+  mp4: '#8b5cf6', avi: '#8b5cf6',
 }
 const iconColorMap: Record<string, string> = {
-  pdf: '#e74c3c', doc: '#1e50ae', docx: '#1e50ae',
+  pdf: '#ef4444', doc: '#3b82f6', docx: '#3b82f6',
   xls: '#27ae60', xlsx: '#27ae60', ppt: '#e67e22', pptx: '#e67e22',
   link: '#00bcd4', txt: '#7f8c8d', md: '#7f8c8d',
 }
@@ -381,11 +383,8 @@ watch(() => route.params.id, (id) => {
 .doc-list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  background: var(--color-border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  border: 1px solid var(--color-border);
+  gap: 10px;
+  margin-bottom: var(--spacing-lg);
 }
 
 .doc-card {
@@ -395,13 +394,19 @@ watch(() => route.params.id, (id) => {
   padding: 16px 20px;
   background: #fff;
   cursor: pointer;
-  transition: all .15s ease;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  transition: all .2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
 }
 .doc-card:hover {
-  background: #fafcff;
+  border-color: var(--color-border);
+  box-shadow: 0 6px 20px rgba(0,0,0,.07);
+  transform: translateY(-1px);
 }
 .doc-card:active {
-  background: #f0f4fa;
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
 }
 
 /* Icon */
@@ -418,7 +423,8 @@ watch(() => route.params.id, (id) => {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: .5px;
-  color: #555;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,.2);
 }
 
 /* Content */
@@ -436,6 +442,9 @@ watch(() => route.params.id, (id) => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+.doc-card:hover .doc-title {
+  color: var(--color-primary);
 }
 .doc-meta-row {
   display: flex;
