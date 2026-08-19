@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.env
+.env.local
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+frontend/dist/
+
+# Docker
+pg_data/
+meili_data/
+minio_data/
+
+# Seed documents (large files, not pushed to GitHub)
+seed_docs/
+
+# Alembic
+backend/alembic/versions/*.pyc
+
+# Claude Code local config (credentials may appear in permission rules)
+.claude/settings.json
+.claude/settings.local.json
+
+# Regulatory data downloads (large attachments, regeneratable)
+scripts/regulatory_downloads/
+scripts/nmpa_downloads/
+scripts/kcia_output/downloads/
+scripts/nmpa_cosmetics_pdfs/
+scripts/nifdc_downloads/
+scripts/empty_links_downloads/
+scripts/cmde_downloads/
+scripts/provincial_qa/
+scripts/cir_output/
+scripts/kcia_output/
+scripts/nmpa_output/
+
+# Local tooling / caches (not for repo)
+.pylibs/
+.upload_cache/
+.audit/
+.audit-venv/
+.audit_pkgs/
+
+# Test artifacts / transient secrets
+reports/
+.tmp_deploy_secrets.txt
+frontend-dist.tar.gz
+scripts/ui-tests/shots/
+
+# Temp attachment files (backfill source)
+.tmp_attachments/
+
+# Headless Chrome CDP test profile
+.chrome-cdp-profile/
